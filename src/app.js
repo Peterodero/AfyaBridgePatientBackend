@@ -10,6 +10,7 @@ const { errorHandler } = require('./middleware/errorHandler');
 
 // Import all routes
 const authRoutes = require('./routes/authRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 const {
   patientRouter, emergencyRouter, symptomRouter,
   specialistRouter, appointmentRouter, medsRouter,
@@ -49,6 +50,7 @@ app.get('/health', (req, res) => {
 
 //  ROUTES 
 app.use(`${API_PREFIX}/auth`, authLimiter, authRoutes);
+app.use(`${API_PREFIX}/admin`, adminRoutes);
 app.use(`${API_PREFIX}/patient`, patientRouter);
 app.use(`${API_PREFIX}/emergency`, emergencyRouter);
 app.use(`${API_PREFIX}/symptom-checker`, symptomRouter);

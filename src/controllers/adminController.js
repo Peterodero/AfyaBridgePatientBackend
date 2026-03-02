@@ -15,8 +15,6 @@ const getAllPatients = async (req, res) => {
       search,
     } = req.query;
 
-    console.log(req.query);
-
     const where = {}; 
 
     // Filter by status
@@ -194,36 +192,43 @@ const deletePatient = async (req, res) => {
 };
 
 // PATCH /admin/users/:id/reset-password
+
 const adminResetPassword = async (req, res) => {
   try {
+    const { newPassword } = req.body;
+    
+    if (!newPassword || newPassword.length < 8) {
+      return errorResponse(res, 'New password must be at least 8 characters long', 400, 'INVALID_PASSWORD');
+    }
+
     const patient = await Patient.findByPk(req.params.id);
     if (!patient) return errorResponse(res, 'Patient not found', 404, 'NOT_FOUND');
 
-    // Generate and send OTP to patient's phone
-    const otpCode = await saveOTP(patient.phoneNumber, 'reset');
-    await sendOTP(patient.phoneNumber, otpCode);
+    // Update password directly (hook will hash it automatically)
+    patient.password = newPassword;
+    await patient.save();
 
-    // Revoke all active sessions
+    // Revoke all active sessions to force logout
     await RefreshToken.update(
       { revoked: true },
       { where: { patientId: patient.id } }
     );
 
-    // Notify patient
+    // Notify patient about password change
     await Notification.create({
       patientId: patient.id,
       type: 'general',
-      title: 'Password Reset Initiated',
-      message: 'A password reset has been initiated for your account. Check your phone for the reset code.',
+      title: 'Password Changed by Admin',
+      message: 'Your account password has been reset by an administrator. If you did not request this, please contact support immediately.',
       icon: '🔐',
       iconBg: '#F59E0B',
     });
 
     return successResponse(res, {
       patientId: patient.id,
-      phoneNumber: patient.phoneNumber.slice(0, 5) + '******' + patient.phoneNumber.slice(-3),
-      message: 'Password reset OTP sent to patient phone',
-    }, 'Password reset initiated successfully');
+      message: 'Password has been reset successfully',
+    }, 'Password reset successful');
+
   } catch (error) {
     return errorResponse(res, error.message, 500, 'ADMIN_RESET_PASSWORD_ERROR');
   }

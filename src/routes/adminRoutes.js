@@ -35,4 +35,20 @@ router.delete('/users/:id', adminAuth, adminController.deletePatient);
 // PATCH /admin/users/:id/reset-password
 router.patch('/users/:id/reset-password', adminAuth, adminController.adminResetPassword);
 
+// PATCH /admin/users/:id/reset-password
+router.patch('/users/:id/reset-password',
+  adminAuth,
+  [
+    body('newPassword')
+      .isLength({ min: 8 })
+      .withMessage("Password must be at least 8 characters")
+      .matches(/[A-Z]/)
+      .withMessage("Password must contain an uppercase letter")
+      .matches(/[0-9]/)
+      .withMessage("Password must contain a number"),
+    validate,
+  ],
+  adminController.adminResetPassword
+);
+
 module.exports = router;

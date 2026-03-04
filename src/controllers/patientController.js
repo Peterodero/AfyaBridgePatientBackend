@@ -1,7 +1,5 @@
 const {
-  Appointment,
   Notification,
-  Specialist,
   Allergy,
   Condition,
   MedicalRecord,
@@ -323,8 +321,6 @@ const getClinicalProfile = async (req, res) => {
 
 // POST /patient/records/allergies
 const addAllergy = async (req, res) => {
-  console.log(req.body);
-  console.log(req.patient.id);
   try {
     const { allergen, reaction, severity, diagnosedDate } = req.body;
     const allergy = await Allergy.create({

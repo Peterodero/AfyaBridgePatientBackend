@@ -49,15 +49,18 @@ const sequelize = new Sequelize(
       }
     },
     logging: false,
+    define: {
+      freezeTableName: true
+    }
   }
 );
 
 const connectDB = async () => {
   try {
     await sequelize.authenticate();
-    console.log('✅ TiDB Database connected successfully');
+    console.log(' TiDB Database connected successfully');
   } catch (error) {
-    console.error('❌ Database connection failed:', error.message);
+    console.error(' Database connection failed:', error.message);
     process.exit(1);
   }
 };

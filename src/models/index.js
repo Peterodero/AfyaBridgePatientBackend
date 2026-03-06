@@ -6,7 +6,13 @@ const bcrypt = require('bcryptjs');
 const Patient = sequelize.define('Patient', {
   id: { type: DataTypes.STRING(30), primaryKey: true, defaultValue: () => `PAT-${Date.now()}` },
   fullName: { type: DataTypes.STRING(100), allowNull: false },
-  phoneNumber: { type: DataTypes.STRING(20), allowNull: false, unique: true },
+
+
+  phoneNumber: { type: DataTypes.STRING(20), allowNull: false, 
+    unique: true },
+
+
+    
   email: { type: DataTypes.STRING(100), unique: true },
   password: { type: DataTypes.STRING(255), allowNull: false },
   dateOfBirth: DataTypes.DATEONLY,

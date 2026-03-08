@@ -1,5 +1,6 @@
 const { RefillOrder, RefillOrderItem, Prescription, Payment, Delivery } = require('../models');
 const { successResponse, errorResponse } = require('../utils/response');
+const serviceClient = require('../utils/serviceClients');
 
 // GET /orders/:refillId/summary
 const getOrderSummary = async (req, res) => {
@@ -19,7 +20,7 @@ const getOrderSummary = async (req, res) => {
       items: order.RefillOrderItems?.map((item) => ({
         id: item.prescriptionId,
         name: item.Prescription?.name,
-        description: `1 Qty`,
+        description: '1 Qty',
         price: item.price,
       })),
       paymentBreakdown: {
@@ -34,41 +35,45 @@ const getOrderSummary = async (req, res) => {
 };
 
 // POST /orders/:refillId/pay
+// Patient backend does NOT touch Daraja/M-Pesa directly.
+// It delegates payment initiation to the pharmacy backend.
+// The pharmacy backend owns M-Pesa STK push and the callback URL.
 const initiatePayment = async (req, res) => {
   try {
     const { refillId } = req.params;
     const { paymentMethod, phoneNumber } = req.body;
 
+    // Verify the order belongs to this patient
     const order = await RefillOrder.findOne({ where: { id: refillId, patientId: req.patient.id } });
     if (!order) return errorResponse(res, 'Order not found', 404, 'NOT_FOUND');
 
-    const payment = await Payment.create({
-      patientId: req.patient.id,
-      refillOrderId: refillId,
-      method: paymentMethod,
-      phoneNumber,
-      amount: order.total,
-      expiresAt: new Date(Date.now() + 60 * 1000),
-    });
-
-    // In production: trigger M-Pesa STK push via Daraja API here
-    if (process.env.NODE_ENV === 'development') {
-      console.log(`💳 M-Pesa STK push to ${phoneNumber} for KES ${order.total}`);
+    if (order.paymentStatus === 'paid') {
+      return errorResponse(res, 'This order has already been paid', 400, 'ALREADY_PAID');
     }
 
-    return successResponse(res, {
-      transactionId: payment.id,
-      status: payment.status,
-      message: 'Please check your phone and enter M-Pesa PIN',
-      amount: payment.amount,
-      expiresIn: 60,
+    // Forward payment request to pharmacy backend
+    // Pharmacy backend will trigger M-Pesa STK push, create Payment record,
+    // store checkoutRequestId, and handle the Safaricom callback
+    const result = await serviceClient('pharmacy', 'POST', `/payments/initiate`, {
+      refillOrderId: refillId,
+      patientId: req.patient.id,
+      paymentMethod,
+      phoneNumber,
+      amount: order.total,
     });
+
+    if (!result.success) {
+      return errorResponse(res, result.error, result.status, 'PAYMENT_SERVICE_ERROR');
+    }
+
+    return successResponse(res, result.data);
   } catch (error) {
     return errorResponse(res, error.message, 500, 'INITIATE_PAYMENT_ERROR');
   }
 };
 
 // GET /payments/:transactionId/status
+// Reads Payment record directly from shared DB — no service call needed
 const getPaymentStatus = async (req, res) => {
   try {
     const { transactionId } = req.params;
@@ -79,54 +84,17 @@ const getPaymentStatus = async (req, res) => {
     return successResponse(res, {
       transactionId: payment.id,
       status: payment.status,
-      paymentMethod: 'M-Pesa',
+      paymentMethod: payment.method,
       amount: payment.amount,
-      receiptNumber: payment.mpesaReceiptNumber || payment.receiptNumber,
+      receiptNumber: payment.mpesaReceiptNumber,
     });
   } catch (error) {
     return errorResponse(res, error.message, 500, 'PAYMENT_STATUS_ERROR');
   }
 };
 
-// POST /payments/mpesa/callback  (M-Pesa Daraja callback)
-const mpesaCallback = async (req, res) => {
-  try {
-    const { Body } = req.body;
-    const stkCallback = Body?.stkCallback;
-
-    if (!stkCallback) return res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
-
-    const resultCode = stkCallback.ResultCode;
-    const checkoutRequestId = stkCallback.CheckoutRequestID;
-
-    // Find payment by the Daraja CheckoutRequestID (store when initiating STK)
-    const payment = await Payment.findOne({ where: { id: checkoutRequestId } });
-
-    if (payment) {
-      if (resultCode === 0) {
-        const metadata = stkCallback.CallbackMetadata?.Item || [];
-        const getVal = (name) => metadata.find((i) => i.Name === name)?.Value;
-
-        await payment.update({
-          status: 'completed',
-          mpesaReceiptNumber: getVal('MpesaReceiptNumber'),
-        });
-
-        // Update order status
-        await RefillOrder.update({ paymentStatus: 'paid', status: 'processing' }, { where: { id: payment.refillOrderId } });
-      } else {
-        await payment.update({ status: 'failed' });
-      }
-    }
-
-    return res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
-  } catch (error) {
-    console.error('M-Pesa callback error:', error);
-    return res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' }); // Always return 200 to Safaricom
-  }
-};
-
 // GET /orders/:refillId/confirmation
+// Reads from shared DB directly — pharmacy backend already updated the order after payment
 const getOrderConfirmation = async (req, res) => {
   try {
     const { refillId } = req.params;
@@ -141,8 +109,8 @@ const getOrderConfirmation = async (req, res) => {
     return successResponse(res, {
       orderId: order.id,
       status: order.status,
-      paymentMethod: 'M-Pesa',
-      amount: order.total,
+      paymentStatus: order.paymentStatus,
+      fulfillmentType: order.fulfillmentType,
       items: order.RefillOrderItems?.map((item) => ({
         name: item.Prescription?.name,
         quantity: item.quantity,
@@ -151,7 +119,7 @@ const getOrderConfirmation = async (req, res) => {
       total: order.total,
       nextSteps: 'Your order has been confirmed and is being processed.',
       actions: [
-        { label: 'View Order Status', action: 'track_order', endpoint: `/orders/${order.id}/track` },
+        { label: 'Track Order', action: 'track_order', endpoint: `/orders/${order.id}/track` },
         { label: 'Back to Home', action: 'home' },
       ],
     });
@@ -161,6 +129,7 @@ const getOrderConfirmation = async (req, res) => {
 };
 
 // GET /orders/:refillId/track
+// Reads Delivery record from shared DB — rider backend updates it as delivery progresses
 const trackDelivery = async (req, res) => {
   try {
     const { refillId } = req.params;
@@ -180,7 +149,7 @@ const trackDelivery = async (req, res) => {
     return successResponse(res, {
       orderId: order.id,
       status: order.status,
-      estimatedArrival: delivery?.estimatedArrival || '12 min',
+      estimatedArrival: delivery?.estimatedArrival || 'Calculating...',
       lastUpdated: 'Updated 1 min ago',
       timeline,
       courier: delivery ? {
@@ -199,6 +168,7 @@ const trackDelivery = async (req, res) => {
 };
 
 // POST /orders/:refillId/courier/contact
+// Reads courier phone from shared DB then lets patient call/SMS directly
 const contactCourier = async (req, res) => {
   try {
     const { refillId } = req.params;
@@ -216,4 +186,11 @@ const contactCourier = async (req, res) => {
   }
 };
 
-module.exports = { getOrderSummary, initiatePayment, getPaymentStatus, mpesaCallback, getOrderConfirmation, trackDelivery, contactCourier };
+module.exports = {
+  getOrderSummary,
+  initiatePayment,
+  getPaymentStatus,
+  getOrderConfirmation,
+  trackDelivery,
+  contactCourier,
+};

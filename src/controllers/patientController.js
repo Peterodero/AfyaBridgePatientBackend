@@ -5,6 +5,8 @@ const {
   MedicalRecord,
   Vital,
   EmergencyContact,
+  Appointment,
+  Specialist,
 } = require("../models");
 const { successResponse, errorResponse } = require("../utils/response");
 const { Op } = require("sequelize");

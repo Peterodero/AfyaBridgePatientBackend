@@ -92,7 +92,7 @@ const searchPharmacies = async (req, res) => {
 // GET /pharmacies/map
 const getPharmacyMapData = async (req, res) => {
   try {
-    const { lat, lng, radius = 3 } = req.query;
+    const { lat, lng, radius = 3000 } = req.query;
 
     const pharmacies = await Pharmacy.findAll({ where: { is_active: true } });
 
@@ -113,9 +113,9 @@ const getPharmacyMapData = async (req, res) => {
         icon: 'pin',
       })),
       controls: [
-        { type: 'zoom_in', icon: '➕' },
-        { type: 'zoom_out', icon: '➖' },
-        { type: 'current_location', icon: '📍' },
+        { type: 'zoom_in', icon: '' },
+        { type: 'zoom_out', icon: '' },
+        { type: 'current_location', icon: '' },
       ],
     });
   } catch (error) {

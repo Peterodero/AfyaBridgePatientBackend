@@ -44,7 +44,7 @@ const recordTransaction = async ({ wallet, type, category, amount, referenceId, 
     transacted_at: new Date(),
   }, { transaction: t });
 
-  return { txn, newBalance };
+  return { txn, newBalance }; 
 };
 
 // GET /wallet

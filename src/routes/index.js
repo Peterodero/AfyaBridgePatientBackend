@@ -362,14 +362,15 @@ notificationRouter.post(
 );
 
 notificationRouter.delete(
-  "/:notificationId",
-  authenticate,
-  notificationController.deleteNotification,
-);
-notificationRouter.delete(
   "/delete-all",
   authenticate,
   notificationController.deleteAllNotifications,
+);
+
+notificationRouter.delete(
+  "/:notificationId",
+  authenticate,
+  notificationController.deleteNotification,
 );
 
 module.exports.notificationRouter = notificationRouter;

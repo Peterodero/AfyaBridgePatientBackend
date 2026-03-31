@@ -119,6 +119,7 @@ const deleteNotification = async (req, res) => {
 
 // DELETE /notifications/delete-all
 const deleteAllNotifications = async (req, res) => {
+  console.log("1 trying")
   try {
     const deletedCount = await Notification.destroy({ where: { user_id: req.user.id } });
     return successResponse(res, { deletedCount }, 'All notifications deleted successfully');

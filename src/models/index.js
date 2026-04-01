@@ -5,100 +5,279 @@ const bcrypt = require('bcryptjs');
 // USER
 // Single table for all user types: patient, doctor, rider,
 // pharmacist, admin. Role-specific fields are nullable.
-const User = sequelize.define('User', {
-  id:                           { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
-  role:                         { type: DataTypes.ENUM('patient','doctor','pharmacist','rider','admin'), allowNull: false },
-  full_name:                    { type: DataTypes.STRING(255), allowNull: false },
-  email:                        { type: DataTypes.STRING(255), unique: true, allowNull: false },
-  password_hash:                { type: DataTypes.STRING(255), allowNull: false },
-  phone_number:                 { type: DataTypes.STRING(20), unique: true },
-  profile_image:                { type: DataTypes.STRING(500) },
-  initials:                     { type: DataTypes.STRING(10) },
-  is_active:                    { type: DataTypes.BOOLEAN, defaultValue: true },
-  is_verified:                  { type: DataTypes.BOOLEAN, defaultValue: false },
-  two_factor_enabled:           { type: DataTypes.BOOLEAN, defaultValue: false },
-  two_factor_method:            { type: DataTypes.ENUM('sms','email','app'), defaultValue: 'sms' },
-  two_factor_phone:             { type: DataTypes.STRING(20) },
-  last_password_change:         { type: DataTypes.DATE },
-  last_login:                   { type: DataTypes.DATE },
-  account_status:               { type: DataTypes.ENUM('active','suspended','locked','disabled'), defaultValue: 'active' },
-  status_reason:                { type: DataTypes.STRING(255) },
-  bio:                          { type: DataTypes.TEXT },
-  gender:                       { type: DataTypes.STRING(20) },
-  date_of_birth:                { type: DataTypes.STRING(50) },
-  age:                          { type: DataTypes.INTEGER },
-  blood_type:                   { type: DataTypes.STRING(10) },
-  address:                      { type: DataTypes.STRING(255) },
-  provider_sharing:             { type: DataTypes.BOOLEAN, defaultValue: true },
-  research_opt_in:              { type: DataTypes.BOOLEAN, defaultValue: false },
-  // Patient JSON columns
-  emergency_contacts:           { type: DataTypes.JSON },
-  allergies:                    { type: DataTypes.JSON },
-  surgeries:                    { type: DataTypes.JSON },
-  visits:                       { type: DataTypes.JSON },
-  conditions:                   { type: DataTypes.JSON },
-  documents:                    { type: DataTypes.JSON },
-  // Doctor-specific
-  specialty:                    { type: DataTypes.STRING(255) },
-  kmpdc_license:                { type: DataTypes.STRING(100) },
-  hospital:                     { type: DataTypes.STRING(255) },
-  consultation_fee:             { type: DataTypes.FLOAT },
-  allow_video_consultations:    { type: DataTypes.BOOLEAN },
-  allow_in_person_consultations:{ type: DataTypes.BOOLEAN },
-  working_hours:                { type: DataTypes.JSON },
-  slot_duration:                { type: DataTypes.INTEGER },
-  auto_confirm_appointments:    { type: DataTypes.BOOLEAN },
-  rating:                       { type: DataTypes.FLOAT, defaultValue: 0 },
-  total_reviews:                { type: DataTypes.INTEGER, defaultValue: 0 },
-  verification_status:          { type: DataTypes.ENUM('pending_verification','verified','rejected') },
-  verified_at:                  { type: DataTypes.DATE },
-  verified_by:                  { type: DataTypes.STRING(100) },
-  // Rider-specific
-  national_id:                  { type: DataTypes.STRING(50) },
-  vehicle_type:                 { type: DataTypes.STRING(100) },
-  plate_number:                 { type: DataTypes.STRING(50) },
-  driving_license_no:           { type: DataTypes.STRING(100) },
-  license_expiry:               { type: DataTypes.DATE },
-  id_verified:                  { type: DataTypes.BOOLEAN, defaultValue: false },
-  license_verified:             { type: DataTypes.BOOLEAN, defaultValue: false },
-  approved_status:              { type: DataTypes.ENUM('pending','approved','rejected') },
-  date_approved:                { type: DataTypes.DATE },
-  on_duty:                      { type: DataTypes.BOOLEAN, defaultValue: false },
-  emergency_contact:            { type: DataTypes.STRING(100) },
-  orders_made:                  { type: DataTypes.INTEGER, defaultValue: 0 },
-  verified_by_admin:            { type: DataTypes.BOOLEAN, defaultValue: false },
-  // Pharmacist/Manager/Delivery Partner
-  pharmacy_id:                  { type: DataTypes.UUID },
-}, {
-  tableName: 'users',
-  timestamps: true,
-  underscored: true,
-  hooks: {
-    beforeCreate: async (user) => {
-      if (user.password_hash) {
-        const salt = await bcrypt.genSalt(10);
-        user.password_hash = await bcrypt.hash(user.password_hash, salt);
-      }
-    },
-    beforeUpdate: async (user) => {
-      if (user.changed('password_hash')) {
-        const salt = await bcrypt.genSalt(10);
-        user.password_hash = await bcrypt.hash(user.password_hash, salt);
-      }
-    },
-  },
-  indexes: [
-    { unique: true, fields: ['email'] },
-    { unique: true, fields: ['phone_number'] },
-    { fields: ['role'] },
-    { fields: ['account_status'] },
-    { fields: ['pharmacy_id'] },
-  ],
-});
+const User = sequelize.define(
+    "User",
+    {
+      // ─── Identity ─────────────────────────────────────────────
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: UUIDV4,
+        primaryKey: true,
+      },
+      role: {
+        type: DataTypes.ENUM(
+          "patient",
+          "doctor",
+          "pharmacist",
+          "rider",
+          "admin",
+        ),
+        allowNull: false,
+      },
+      full_name: {
+        type: DataTypes.STRING(255),
+        allowNull: false,
+      },
+      email: {
+        type: DataTypes.STRING(255),
+        unique: true,
+        allowNull: false,
+        validate: { isEmail: true },
+      },
+      password_hash: {
+        type: DataTypes.STRING(255),
+        allowNull: false,
+      },
+      phone_number: {
+        type: DataTypes.STRING(20),
+        unique: true,
+      },
+      profile_image: {
+        type: DataTypes.STRING(500),
+      },
+      initials: {
+        type: DataTypes.STRING(10),
+      },
 
-User.prototype.comparePassword = async function (password) {
-  return bcrypt.compare(password, this.password_hash);
-};
+      // ─── Status & Auth ─────────────────────────────────────────
+      is_active: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: true,
+      },
+      is_verified: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+      },
+      two_factor_enabled: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+      },
+      two_factor_method: {
+        type: DataTypes.ENUM("sms", "email", "app"),
+        defaultValue: "sms",
+      },
+      two_factor_phone: {
+        type: DataTypes.STRING(20),
+      },
+      last_password_change: {
+        type: DataTypes.DATE,
+      },
+      last_login: {
+        type: DataTypes.DATE,
+      },
+      account_status: {
+        type: DataTypes.ENUM("active", "suspended", "locked", "disabled"),
+        defaultValue: "active",
+      },
+      status_reason: {
+        type: DataTypes.STRING(255),
+      },
+
+      // ─── Profile & Metadata ────────────────────────────────────
+      bio: {
+        type: DataTypes.TEXT,
+      },
+      gender: {
+        type: DataTypes.STRING(20),
+      },
+      date_of_birth: {
+        type: DataTypes.STRING(50), // nullable — patient only
+      },
+      age: {
+        type: DataTypes.INTEGER, // nullable — patient only
+      },
+      blood_type: {
+        type: DataTypes.STRING(10), // nullable — patient only
+      },
+      address: {
+        type: DataTypes.STRING(255),
+      },
+
+      // ─── Security / Privacy ────────────────────────────────────
+      provider_sharing: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: true, // nullable — patient only
+      },
+      research_opt_in: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false, // nullable — patient only
+      },
+
+      // ─── Patient Medical JSON Columns ──────────────────────────
+      emergency_contacts: {
+        type: DataTypes.JSON, // nullable — patient only
+      },
+      allergies: {
+        type: DataTypes.JSON, // nullable — patient only
+      },
+      surgeries: {
+        type: DataTypes.JSON, // nullable — patient only
+      },
+      visits: {
+        type: DataTypes.JSON, // nullable — patient only
+      },
+      conditions: {
+        type: DataTypes.JSON, // nullable — patient only
+      },
+      documents: {
+        type: DataTypes.JSON, // nullable — patient only
+      },
+
+      // ─── Doctor-specific ───────────────────────────────────────
+      specialty: {
+        type: DataTypes.STRING(255), // nullable — doctor only
+      },
+      kmpdc_license: {
+        type: DataTypes.STRING(100), // nullable — doctor only
+      },
+      hospital: {
+        type: DataTypes.STRING(255), // nullable — doctor only
+      },
+      consultation_fee: {
+        type: DataTypes.FLOAT, // nullable — doctor only
+      },
+      allow_video_consultations: {
+        type: DataTypes.BOOLEAN, // nullable — doctor only
+      },
+      allow_in_person_consultations: {
+        type: DataTypes.BOOLEAN, // nullable — doctor only
+      },
+      working_hours: {
+        type: DataTypes.JSON, // nullable — doctor only
+      },
+      slot_duration: {
+        type: DataTypes.INTEGER, // nullable — doctor only
+      },
+      auto_confirm_appointments: {
+        type: DataTypes.BOOLEAN, // nullable — doctor only
+      },
+      rating: {
+        type: DataTypes.FLOAT,
+        defaultValue: 0, // nullable — doctor only
+      },
+      total_reviews: {
+        type: DataTypes.INTEGER,
+        defaultValue: 0, // nullable — doctor only
+      },
+      verification_status: {
+        type: DataTypes.ENUM("pending_verification", "verified", "rejected"), // nullable — doctor only
+        defaultValue: "pending_verification",
+      },
+      verified_at: {
+        type: DataTypes.DATE, // nullable — doctor only
+      },
+      verified_by: {
+        type: DataTypes.STRING(100), // nullable — doctor only
+      },
+
+      // ─── Rider-specific ────────────────────────────────────────
+      national_id: {
+        type: DataTypes.STRING(50), // nullable — rider only
+      },
+      vehicle_type: {
+        type: DataTypes.STRING(100), // nullable — rider only
+      },
+      plate_number: {
+        type: DataTypes.STRING(50), // nullable — rider only
+      },
+      driving_license_no: {
+        type: DataTypes.STRING(100), // nullable — rider only
+      },
+      license_expiry: {
+        type: DataTypes.DATE, // nullable — rider only
+      },
+      id_verified: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false, // nullable — rider only
+      },
+      license_verified: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false, // nullable — rider only
+      },
+      approved_status: {
+        type: DataTypes.ENUM("pending", "approved", "rejected"),// nullable — rider only
+        // nullable — rider only
+      },
+      date_approved: {
+        type: DataTypes.DATE, // nullable — rider only
+      },
+      on_duty: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false, // nullable — rider only
+      },
+      emergency_contact: {
+        type: DataTypes.STRING(100), // nullable — rider only
+      },
+      orders_made: {
+        type: DataTypes.INTEGER,
+        defaultValue: 0, // nullable — rider only
+      },
+      verified_by_admin: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false, // nullable — rider only
+      },
+
+      // ─── PharmacyUser-specific ─────────────────────────────────
+      pharmacy_id: {
+        type: DataTypes.UUID, // nullable — pharmacist / pharmacy_manager / delivery_partner only
+      },
+      gps_lat: {
+        type: DataTypes.STRING(255), // nullable 
+      },
+      gps_lng: {
+        type: DataTypes.STRING(255), // nullable 
+      }
+
+      // NOTE: Notification preferences are stored in the
+      // notification_preferences table, not here.
+    },
+    {
+      tableName: "users",
+      timestamps: true,
+      underscored: true,
+      hooks: {
+        beforeCreate: async (user) => {
+          if (user.password_hash) {
+            const bcrypt = require("bcryptjs");
+            const alreadyHashed =
+              user.password_hash.startsWith("$2a$") ||
+              user.password_hash.startsWith("$2b$");
+            if (!alreadyHashed) {
+              user.password_hash = await bcrypt.hash(user.password_hash, 10);
+            }
+          }
+        },
+        beforeUpdate: async (user) => {
+          if (user.changed("password_hash")) {
+            const value = user.password_hash;
+            const alreadyHashed =
+              value.startsWith("$2a$") || value.startsWith("$2b$");
+            if (!alreadyHashed) {
+              const bcrypt = require("bcryptjs");
+              user.password_hash = await bcrypt.hash(value, 10);
+            }
+          }
+        },
+      },
+      indexes: [
+        { unique: true, fields: ["email"] },
+        { unique: true, fields: ["phone_number"] },
+        { fields: ["role"] },
+        { fields: ["account_status"] },
+        { fields: ["pharmacy_id"] },
+      ],
+    },
+  );
 
 // OTP VERIFICATION
 const OTPVerification = sequelize.define('OTPVerification', {
@@ -396,11 +575,6 @@ const Prescription = sequelize.define("Prescription", {
     expiry_date: {
       type: DataTypes.DATEONLY,
     },
-
-    // ─── Items (individual drugs as JSON) ─────────────────────
-    // Each item: { drug_id, drug_name, dosage, frequency, duration,
-    //              route, warnings, instructions, quantity,
-    //              substitution_ok, duration_days }
     items: {
       type: DataTypes.JSON,
       allowNull: false,
@@ -450,28 +624,99 @@ const Prescription = sequelize.define("Prescription", {
     ],
   });
 // ORDER
-const Order = sequelize.define('Order', {
-  id:              { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
-  order_number:    { type: DataTypes.STRING(100), unique: true, allowNull: false },
-  prescription_id: { type: DataTypes.UUID },
-  pharmacy_id:     { type: DataTypes.UUID, allowNull: false },
-  prepared_by:     { type: DataTypes.UUID },
-  patient_id:      { type: DataTypes.UUID },
-  patient_name:    { type: DataTypes.STRING(255), allowNull: false },
-  patient_phone:   { type: DataTypes.STRING(20) },
-  patient_address: { type: DataTypes.TEXT },
-  delivery_type:   { type: DataTypes.ENUM('pickup','home_delivery'), defaultValue: 'pickup', allowNull: false },
-  priority:        { type: DataTypes.ENUM('urgent','normal'), defaultValue: 'normal' },
-  status:          { type: DataTypes.ENUM('pending','processing','ready','dispatched','delivered','cancelled'), defaultValue: 'pending', allowNull: false },
-  total_amount:    { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
-  payment_status:  { type: DataTypes.ENUM('unpaid','paid','refunded'), defaultValue: 'unpaid' },
-  payment_method:  { type: DataTypes.ENUM('mpesa','cash','insurance','nhif') },
-  mpesa_ref:       { type: DataTypes.STRING(50) },
-}, {
-  tableName: 'orders',
-  timestamps: true,
-  underscored: true,
-});
+const Order = sequelize.define("Order", {
+
+    // ─── Identity ──────────────────────────────────────────────
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: UUIDV4,
+      primaryKey: true,
+    },
+    order_number: {
+      type: DataTypes.STRING(100),
+      unique: true,
+      allowNull: false,
+    },
+
+    // ─── Relationships ─────────────────────────────────────────
+    prescription_id: {
+      type: DataTypes.UUID,             // FK → prescriptions.id (nullable — walk-in orders)
+    },
+    pharmacy_id: {
+      type: DataTypes.UUID,
+      allowNull: false,                 // FK → pharmacies.id
+    },
+    prepared_by: {
+      type: DataTypes.UUID,             // FK → users.id (role = pharmacist)
+    },
+
+    // ─── Patient Snapshot ──────────────────────────────────────
+    patient_id: {
+      type: DataTypes.UUID,             // FK → users.id (role = patient)
+    },
+    patient_name: {
+      type: DataTypes.STRING(255),
+      allowNull: false,
+    },
+    patient_phone: {
+      type: DataTypes.STRING(20),
+    },
+    patient_address: {
+      type: DataTypes.TEXT,
+    },
+
+    // ─── Order Details ─────────────────────────────────────────
+    delivery_type: {
+      type: DataTypes.ENUM("pickup", "home_delivery"),
+      defaultValue: "pickup",
+      allowNull: false,
+    },
+    priority: {
+      type: DataTypes.ENUM("urgent", "normal"),
+      defaultValue: "normal",
+    },
+    status: {
+      type: DataTypes.ENUM(
+        "pending",
+        "processing",
+        "ready",
+        "dispatched",
+        "delivered",
+        "cancelled"
+      ),
+      defaultValue: "pending",
+      allowNull: false,
+    },
+
+    // ─── Payment ───────────────────────────────────────────────
+    total_amount: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0,
+    },
+    payment_status: {
+      type: DataTypes.ENUM("unpaid", "paid", "refunded"),
+      defaultValue: "unpaid",
+    },
+    payment_method: {
+      type: DataTypes.ENUM("mpesa", "cash", "insurance", "nhif"),
+    },
+    mpesa_ref: {
+      type: DataTypes.STRING(50),
+    },
+
+  }, {
+    tableName: "orders",
+    timestamps: true,
+    underscored: true,
+    indexes: [
+      { unique: true, fields: ["order_number"] },
+      { fields: ["prescription_id"] },
+      { fields: ["pharmacy_id"] },
+      { fields: ["patient_id"] },
+      { fields: ["status"] },
+      { fields: ["payment_status"] },
+    ],
+  });
 
 // DELIVERY
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
@@ -507,43 +752,157 @@ const Delivery = sequelize.define('Delivery', {
   underscored: true,
 });
 
-// WALLET
-const Wallet = sequelize.define('Wallet', {
-  id:             { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
-  user_id:        { type: DataTypes.UUID, allowNull: false, unique: true },
-  balance:        { type: DataTypes.DECIMAL(12, 2), defaultValue: 0, allowNull: false },
-  currency:       { type: DataTypes.STRING(10), defaultValue: 'KES' },
-  is_active:      { type: DataTypes.BOOLEAN, defaultValue: true },
-  payout_method:  { type: DataTypes.ENUM('mpesa','bank') },
-  payout_account: { type: DataTypes.STRING(100) },
-}, {
-  tableName: 'wallets',
-  timestamps: true,
-  underscored: true, 
-});
+const Wallet = sequelize.define("Wallet", {
+
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: UUIDV4,
+      primaryKey: true,
+    },
+    user_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+      unique: true,                     // FK → users.id (one wallet per user)
+    },
+    balance: {
+      type: DataTypes.DECIMAL(12, 2),
+      defaultValue: 0,
+      allowNull: false,
+    },
+
+    currency: {
+      type: DataTypes.STRING(10),
+      defaultValue: "KES",
+    },
+    is_active: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
+    },
+    payout_method: {
+      type: DataTypes.ENUM("mpesa", "bank"),
+    },
+    payout_account: {
+      type: DataTypes.STRING(100),      
+    },
+
+  }, {
+    tableName: "wallets",
+    timestamps: true,
+    underscored: true,
+    indexes: [
+      { unique: true, fields: ["user_id"] },
+      { fields: ["is_active"] },
+    ],
+  });
 
 // TRANSACTION
-const Transaction = sequelize.define('Transaction', {
-  id:             { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
-  wallet_id:      { type: DataTypes.UUID, allowNull: false },
-  user_id:        { type: DataTypes.UUID, allowNull: false },
-  amount:         { type: DataTypes.DECIMAL(12, 2), allowNull: false },
-  currency:       { type: DataTypes.STRING(10), defaultValue: 'KES' },
-  type:           { type: DataTypes.ENUM('credit','debit'), allowNull: false },
-  category:       { type: DataTypes.ENUM('consultation_fee','order_payment','delivery_fee','payout','refund','platform_fee','top_up','adjustment'), allowNull: false },
-  status:         { type: DataTypes.ENUM('pending','completed','failed','reversed'), defaultValue: 'pending', allowNull: false },
-  reference_id:   { type: DataTypes.UUID },
-  reference_type: { type: DataTypes.STRING(50) },
-  payment_method: { type: DataTypes.ENUM('mpesa','cash','insurance','nhif','wallet') },
-  mpesa_ref:      { type: DataTypes.STRING(100) },
-  balance_after:  { type: DataTypes.DECIMAL(12, 2) },
-  description:    { type: DataTypes.STRING(255) },
-  transacted_at:  { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
-}, {
-  tableName: 'transactions',
-  timestamps: true,
-  underscored: true,
-});
+const Transaction = sequelize.define("Transaction", {
+
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: UUIDV4,
+      primaryKey: true,
+    },
+
+    // ─── Wallet / User ───────────────────────────────────────
+    wallet_id: {
+      type: DataTypes.UUID,
+      allowNull: false,                 // FK → wallets.id
+    },
+    user_id: {
+      type: DataTypes.UUID,
+      allowNull: false,                 // FK → users.id (denormalized for easy querying)
+    },
+
+    // ─── Amount ──────────────────────────────────────────────
+    amount: {
+      type: DataTypes.DECIMAL(12, 2),
+      allowNull: false,
+    },
+    currency: {
+      type: DataTypes.STRING(10),
+      defaultValue: "KES",
+    },
+
+    // ─── Type ────────────────────────────────────────────────
+    type: {
+      type: DataTypes.ENUM("credit", "debit"),
+      allowNull: false,
+    },
+
+    // ─── Category ────────────────────────────────────────────
+    // What triggered this transaction
+    category: {
+      type: DataTypes.ENUM(
+        "consultation_fee",             // doctor receives from patient
+        "order_payment",                // pharmacy receives from patient
+        "delivery_fee",                 // rider earns per delivery
+        "payout",                       // rider / pharmacist withdrawal
+        "refund",                       // patient refunded
+        "platform_fee",                 // platform deducts commission
+        "top_up",                       // user adds funds
+        "adjustment"                    // manual admin correction
+      ),
+      allowNull: false,
+    },
+
+    // ─── Status ──────────────────────────────────────────────
+    status: {
+      type: DataTypes.ENUM("pending", "completed", "failed", "reversed"),
+      defaultValue: "pending",
+      allowNull: false,
+    },
+
+    // ─── Reference (what triggered this transaction) ─────────
+    reference_id: {
+      type: DataTypes.UUID,             // e.g. order_id, delivery_id, appointment_id
+    },
+    reference_type: {
+      type: DataTypes.STRING(50),       // e.g. "order", "delivery", "appointment"
+    },
+
+    // ─── Payment Details ─────────────────────────────────────
+    payment_method: {
+      type: DataTypes.ENUM("mpesa", "cash", "insurance", "nhif", "wallet"),
+    },
+    mpesa_ref: {
+      type: DataTypes.STRING(100),      // M-Pesa transaction code
+    },
+
+    // ─── Balance Snapshot ────────────────────────────────────
+    // Balance on the wallet AFTER this transaction was applied.
+    // Useful for statement generation without re-computing history.
+    balance_after: {
+      type: DataTypes.DECIMAL(12, 2),
+    },
+
+    // ─── Notes ───────────────────────────────────────────────
+    description: {
+      type: DataTypes.STRING(255),      // human readable e.g. "Payment for Order #00123"
+    },
+
+    // ─── Timestamps ──────────────────────────────────────────
+    transacted_at: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW,
+    },
+
+  }, {
+    tableName: "transactions",
+    timestamps: true,
+    underscored: true,
+    indexes: [
+      { fields: ["wallet_id"] },
+      { fields: ["user_id"] },
+      { fields: ["type"] },
+      { fields: ["category"] },
+      { fields: ["status"] },
+      { fields: ["reference_id", "reference_type"] },
+      { fields: ["transacted_at"] },    // for trend/date range queries
+      { fields: ["payment_method"] },
+    ],
+  });
+
 
 // REFRESH TOKEN
 // Stores issued refresh tokens for session management and revocation.

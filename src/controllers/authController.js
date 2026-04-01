@@ -159,6 +159,7 @@ const login = async (req, res) => {
     const { identifier, password } = req.body;
 
     const user = await User.findOne({ where: { phone_number: identifier, role: 'patient' } });
+    
     if (!user)
       return errorResponse(res, 'Invalid credentials', 401, 'INVALID_CREDENTIALS');
 
@@ -168,7 +169,8 @@ const login = async (req, res) => {
 
     if (!user.is_verified) {
       const otpCode = await saveOTP(user.phone_number, 'registration');
-      console.log(`Generated OTP for ${phoneNumber}: ${otpCode}`);
+      console.log(`Generated OTP for ${user.phone_number}: ${otpCode}`);
+      
       // TODO: await sendSMS(user.phone_number, `Your verification code is ${otpCode}`);
       return errorResponse(res, 'Phone not verified. A new code has been sent.', 403, 'NOT_VERIFIED');
     }

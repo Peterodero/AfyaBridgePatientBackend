@@ -279,6 +279,10 @@ const User = sequelize.define(
     },
   );
 
+  User.prototype.comparePassword = async function (password) {
+  return bcrypt.compare(password, this.password_hash);
+};
+
 // OTP VERIFICATION
 const OTPVerification = sequelize.define('OTPVerification', {
   id:         { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },

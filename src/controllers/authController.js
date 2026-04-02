@@ -77,15 +77,25 @@ const register = async (req, res) => {
     if (!termsAccepted)
       return errorResponse(res, 'You must accept terms and conditions', 400, 'TERMS_NOT_ACCEPTED');
 
+    if (!fullName)
+      return errorResponse(res, 'Full name is required', 400, 'FULL_NAME_REQUIRED');
+
+    if (!phoneNumber)
+      return errorResponse(res, 'Phone number is required', 400, 'PHONE_REQUIRED');
+
+    if (!email)
+      return errorResponse(res, 'Email is required', 400, 'EMAIL_REQUIRED');
+
+    if (!password)
+      return errorResponse(res, 'Password is required', 400, 'PASSWORD_REQUIRED');
+
     const existingPhone = await User.findOne({ where: { phone_number: phoneNumber, role: 'patient' } });
     if (existingPhone)
       return errorResponse(res, 'Phone number already registered', 409, 'PHONE_EXISTS');
 
-    if (email) {
-      const emailExists = await User.findOne({ where: { email } });
-      if (emailExists)
-        return errorResponse(res, 'Email already registered', 409, 'EMAIL_EXISTS');
-    }
+    const existingEmail = await User.findOne({ where: { email } });
+    if (existingEmail)
+      return errorResponse(res, 'Email already registered', 409, 'EMAIL_EXISTS');
 
     const user = await User.create({
       role: 'patient',
@@ -158,8 +168,16 @@ const login = async (req, res) => {
   try {
     const { identifier, password } = req.body;
 
-    const user = await User.findOne({ where: { phone_number: identifier, role: 'patient' } });
-    
+    // Detect whether identifier is email or phone
+    const isEmail = identifier.includes('@');
+
+    const user = await User.findOne({
+      where: {
+        ...(isEmail ? { email: identifier } : { phone_number: identifier }),
+        role: 'patient',
+      },
+    });
+
     if (!user)
       return errorResponse(res, 'Invalid credentials', 401, 'INVALID_CREDENTIALS');
 
@@ -168,10 +186,9 @@ const login = async (req, res) => {
       return errorResponse(res, 'Invalid credentials', 401, 'INVALID_CREDENTIALS');
 
     if (!user.is_verified) {
+      // Always send OTP to phone, regardless of login method
       const otpCode = await saveOTP(user.phone_number, 'registration');
       console.log(`Generated OTP for ${user.phone_number}: ${otpCode}`);
-      
-      // TODO: await sendSMS(user.phone_number, `Your verification code is ${otpCode}`);
       return errorResponse(res, 'Phone not verified. A new code has been sent.', 403, 'NOT_VERIFIED');
     }
 
@@ -181,7 +198,6 @@ const login = async (req, res) => {
     const accessToken = generateAccessToken(user.id);
     const newRefreshToken = generateRefreshToken(user.id);
 
-    // Store refresh token in DB for revocation support
     await storeRefreshToken(user.id, newRefreshToken, req);
     await User.update({ last_login: new Date() }, { where: { id: user.id } });
 

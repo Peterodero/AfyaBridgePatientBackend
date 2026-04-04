@@ -1,4 +1,4 @@
-const { Notification } = require('../models');
+const { models:{Notification} } = require('../models/index.js');
 const { successResponse, errorResponse } = require('../utils/response');
 const { Op } = require('sequelize');
 

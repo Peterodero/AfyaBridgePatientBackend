@@ -1,4 +1,7 @@
-const { User, Vital, Notification, OTPVerification } = require('../models');
+const notifications = require('../models/notifications');
+const otp_verifications = require('../models/otp_verifications');
+const users = require('../models/users');
+const vitals = require('../models/vitals');
 const { successResponse, errorResponse } = require('../utils/response');
 const { Op } = require('sequelize');
 
@@ -26,7 +29,7 @@ const getAllPatients = async (req, res) => {
       ];
     }
 
-    const { count, rows } = await User.findAndCountAll({
+    const { count, rows } = await users.findAndCountAll({
       where,
       attributes: { exclude: ['password_hash'] },
       order: [['created_at', 'DESC']],
@@ -51,7 +54,7 @@ const getAllPatients = async (req, res) => {
 // GET /admin/users/:id
 const getPatientById = async (req, res) => {
   try {
-    const patient = await User.findOne({
+    const patient = await users.findOne({
       where: { id: req.params.id, role: 'patient' },
       attributes: { exclude: ['password_hash'] },
     });
@@ -59,13 +62,13 @@ const getPatientById = async (req, res) => {
     if (!patient) return errorResponse(res, 'Patient not found', 404, 'NOT_FOUND');
 
     // Vitals are in their own table
-    const vitals = await Vital.findAll({
+    const vitals = await vitals.findAll({
       where: { patient_id: patient.id },
       order: [['recorded_at', 'DESC']],
       limit: 5,
     });
 
-    const unreadNotifications = await Notification.count({
+    const unreadNotifications = await notifications.count({
       where: { user_id: patient.id, is_read: false },
     });
 
@@ -101,7 +104,7 @@ const updatePatientStatus = async (req, res) => {
     if (!validStatuses.includes(status))
       return errorResponse(res, `Status must be one of: ${validStatuses.join(', ')}`, 400, 'INVALID_STATUS');
 
-    const patient = await User.findOne({ where: { id: req.params.id, role: 'patient' } });
+    const patient = await users.findOne({ where: { id: req.params.id, role: 'patient' } });
     if (!patient) return errorResponse(res, 'Patient not found', 404, 'NOT_FOUND');
 
     await patient.update({
@@ -110,7 +113,7 @@ const updatePatientStatus = async (req, res) => {
       is_active: status === 'active',
     });
 
-    await Notification.create({
+    await notifications.create({
       user_id: patient.id,
       title: status === 'active' ? 'Account Activated' : 'Account Suspended',
       message: status === 'active'
@@ -133,14 +136,14 @@ const updatePatientStatus = async (req, res) => {
 // DELETE /admin/users/:id
 const deletePatient = async (req, res) => {
   try {
-    const patient = await User.findOne({ where: { id: req.params.id, role: 'patient' } });
+    const patient = await users.findOne({ where: { id: req.params.id, role: 'patient' } });
     if (!patient) return errorResponse(res, 'Patient not found', 404, 'NOT_FOUND');
 
     // Delete linked records in other tables
     await Promise.all([
-      Vital.destroy({ where: { patient_id: patient.id } }),
-      Notification.destroy({ where: { user_id: patient.id } }),
-      OTPVerification.destroy({
+      vitals.destroy({ where: { patient_id: patient.id } }),
+      notifications.destroy({ where: { user_id: patient.id } }),
+      otp_verifications.destroy({
         where: {
           [Op.or]: [
             { phone: patient.phone_number },
@@ -167,7 +170,7 @@ const adminResetPassword = async (req, res) => {
     if (!newPassword || newPassword.length < 8)
       return errorResponse(res, 'New password must be at least 8 characters', 400, 'INVALID_PASSWORD');
 
-    const patient = await User.findOne({ where: { id: req.params.id, role: 'patient' } });
+    const patient = await users.findOne({ where: { id: req.params.id, role: 'patient' } });
     if (!patient) return errorResponse(res, 'Patient not found', 404, 'NOT_FOUND');
 
     // beforeUpdate hook hashes automatically
@@ -176,7 +179,7 @@ const adminResetPassword = async (req, res) => {
       last_password_change: new Date(),
     });
 
-    await Notification.create({
+    await notifications.create({
       user_id: patient.id,
       title: 'Password Changed by Admin',
       message: 'Your password has been reset by an administrator. If you did not request this, contact support immediately.',

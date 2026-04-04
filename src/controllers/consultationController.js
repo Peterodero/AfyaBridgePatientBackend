@@ -1,4 +1,4 @@
-const { Consultation, Appointment } = require('../models');
+const { models: {Appointment} } = require('../models/index.js');
 const { successResponse, errorResponse } = require('../utils/response');
 const serviceClient = require('../utils/serviceClients');
 

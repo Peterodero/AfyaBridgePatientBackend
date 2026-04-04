@@ -1,4 +1,4 @@
-const { User, Vital, Notification, Appointment, MedicalRecord } = require('../models');
+const { models:{User, Vital, Notification, Appointment, MedicalRecord} } = require('../models/index.js');
 const { successResponse, errorResponse } = require('../utils/response');
 const { Op } = require('sequelize');
 const { cloudinary, uploadToCloudinary } = require('../config/cloudinary');

@@ -1,1274 +1,323 @@
-const { DataTypes, UUIDV4 } = require('sequelize');
-const { sequelize } = require('../config/database');
-const bcrypt = require('bcryptjs');
+const { sequelize } = require("../config/database.js");
 
-// USER
-// Single table for all user types: patient, doctor, rider,
-// pharmacist, admin. Role-specific fields are nullable.
-const User = sequelize.define(
-    "User",
-    {
-      // ─── Identity ─────────────────────────────────────────────
-      id: {
-        type: DataTypes.UUID,
-        defaultValue: UUIDV4,
-        primaryKey: true,
-      },
-      role: {
-        type: DataTypes.ENUM(
-          "patient",
-          "doctor",
-          "pharmacist",
-          "rider",
-          "admin",
-        ),
-        allowNull: false,
-      },
-      full_name: {
-        type: DataTypes.STRING(255),
-        allowNull: false,
-      },
-      email: {
-        type: DataTypes.STRING(255),
-        unique: true,
-        allowNull: false,
-        validate: { isEmail: true },
-      },
-      password_hash: {
-        type: DataTypes.STRING(255),
-        allowNull: false,
-      },
-      phone_number: {
-        type: DataTypes.STRING(20),
-        unique: true,
-      },
-      profile_image: {
-        type: DataTypes.STRING(500),
-      },
-      initials: {
-        type: DataTypes.STRING(10),
-      },
+// ─── Load Models ──────────────────────────────────────────────
+const User                  = require("./users.js");
+const Pharmacies            = require("./pharmacies.js");
+const PharmacyRegistration  = require("./pharmacy_registrations.js");
+const OTPVerification       = require("./otp_verifications.js");
 
-      // ─── Status & Auth ─────────────────────────────────────────
-      is_active: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: true,
-      },
-      is_verified: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-      },
-      two_factor_enabled: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-      },
-      two_factor_method: {
-        type: DataTypes.ENUM("sms", "email", "app"),
-        defaultValue: "sms",
-      },
-      two_factor_phone: {
-        type: DataTypes.STRING(20),
-      },
-      last_password_change: {
-        type: DataTypes.DATE,
-      },
-      last_login: {
-        type: DataTypes.DATE,
-      },
-      account_status: {
-        type: DataTypes.ENUM("active", "suspended", "locked", "disabled"),
-        defaultValue: "active",
-      },
-      status_reason: {
-        type: DataTypes.STRING(255),
-      },
+const Appointments          = require("./appointments.js");
+const Consultations         = require("./consultations.js");
 
-      // ─── Profile & Metadata ────────────────────────────────────
-      bio: {
-        type: DataTypes.TEXT,
-      },
-      gender: {
-        type: DataTypes.STRING(20),
-      },
-      date_of_birth: {
-        type: DataTypes.STRING(50), // nullable — patient only
-      },
-      age: {
-        type: DataTypes.INTEGER, // nullable — patient only
-      },
-      blood_type: {
-        type: DataTypes.STRING(10), // nullable — patient only
-      },
-      address: {
-        type: DataTypes.STRING(255),
-      },
+const Message               = require("./messages.js");
+const Vital                 = require("./vitals.js");
+const LabOrder              = require("./lab_orders.js");
+const Prescription          = require("./prescriptions.js");
 
-      // ─── Security / Privacy ────────────────────────────────────
-      provider_sharing: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: true, // nullable — patient only
-      },
-      research_opt_in: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false, // nullable — patient only
-      },
+const Order                 = require("./orders.js");
+const Delivery              = require("./deliveries.js");
+const Receipt               = require("./receipts.js");
 
-      // ─── Patient Medical JSON Columns ──────────────────────────
-      emergency_contacts: {
-        type: DataTypes.JSON, // nullable — patient only
-      },
-      allergies: {
-        type: DataTypes.JSON, // nullable — patient only
-      },
-      surgeries: {
-        type: DataTypes.JSON, // nullable — patient only
-      },
-      visits: {
-        type: DataTypes.JSON, // nullable — patient only
-      },
-      conditions: {
-        type: DataTypes.JSON, // nullable — patient only
-      },
-      documents: {
-        type: DataTypes.JSON, // nullable — patient only
-      },
+const Drugs                 = require("./drugs.js");
+const PatientMedication     = require("./patient_medications.js");
+const Supplier              = require("./suppliers.js");
+const BulkOrders            = require("./bulk_orders.js");
 
-      // ─── Doctor-specific ───────────────────────────────────────
-      specialty: {
-        type: DataTypes.STRING(255), // nullable — doctor only
-      },
-      kmpdc_license: {
-        type: DataTypes.STRING(100), // nullable — doctor only
-      },
-      hospital: {
-        type: DataTypes.STRING(255), // nullable — doctor only
-      },
-      consultation_fee: {
-        type: DataTypes.FLOAT, // nullable — doctor only
-      },
-      allow_video_consultations: {
-        type: DataTypes.BOOLEAN, // nullable — doctor only
-      },
-      allow_in_person_consultations: {
-        type: DataTypes.BOOLEAN, // nullable — doctor only
-      },
-      working_hours: {
-        type: DataTypes.JSON, // nullable — doctor only
-      },
-      slot_duration: {
-        type: DataTypes.INTEGER, // nullable — doctor only
-      },
-      auto_confirm_appointments: {
-        type: DataTypes.BOOLEAN, // nullable — doctor only
-      },
-      rating: {
-        type: DataTypes.FLOAT,
-        defaultValue: 0, // nullable — doctor only
-      },
-      total_reviews: {
-        type: DataTypes.INTEGER,
-        defaultValue: 0, // nullable — doctor only
-      },
-      verification_status: {
-        type: DataTypes.ENUM("pending_verification", "verified", "rejected"), // nullable — doctor only
-        defaultValue: "pending_verification",
-      },
-      verified_at: {
-        type: DataTypes.DATE, // nullable — doctor only
-      },
-      verified_by: {
-        type: DataTypes.STRING(100), // nullable — doctor only
-      },
+const Wallet                = require("./wallet.js");
+const Transaction           = require("./transactions.js");
 
-      // ─── Rider-specific ────────────────────────────────────────
-      national_id: {
-        type: DataTypes.STRING(50), // nullable — rider only
-      },
-      vehicle_type: {
-        type: DataTypes.STRING(100), // nullable — rider only
-      },
-      plate_number: {
-        type: DataTypes.STRING(50), // nullable — rider only
-      },
-      driving_license_no: {
-        type: DataTypes.STRING(100), // nullable — rider only
-      },
-      license_expiry: {
-        type: DataTypes.DATE, // nullable — rider only
-      },
-      id_verified: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false, // nullable — rider only
-      },
-      license_verified: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false, // nullable — rider only
-      },
-      approved_status: {
-        type: DataTypes.ENUM("pending", "approved", "rejected"),// nullable — rider only
-        // nullable — rider only
-      },
-      date_approved: {
-        type: DataTypes.DATE, // nullable — rider only
-      },
-      on_duty: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false, // nullable — rider only
-      },
-      emergency_contact: {
-        type: DataTypes.STRING(100), // nullable — rider only
-      },
-      orders_made: {
-        type: DataTypes.INTEGER,
-        defaultValue: 0, // nullable — rider only
-      },
-      verified_by_admin: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false, // nullable — rider only
-      },
+const Notifications         = require("./notifications.js");
+const BroadcastAnnouncement = require("./broadcast_announcements.js");
 
-      // ─── PharmacyUser-specific ─────────────────────────────────
-      pharmacy_id: {
-        type: DataTypes.UUID, // nullable — pharmacist / pharmacy_manager / delivery_partner only
-      },
-      gps_lat: {
-        type: DataTypes.STRING(255), // nullable 
-      },
-      gps_lng: {
-        type: DataTypes.STRING(255), // nullable 
-      }
+const Issue                 = require("./issues.js");
 
-      // NOTE: Notification preferences are stored in the
-      // notification_preferences table, not here.
-    },
-    {
-      tableName: "users",
-      timestamps: true,
-      underscored: true,
-      hooks: {
-        beforeCreate: async (user) => {
-          if (user.password_hash) {
-            const bcrypt = require("bcryptjs");
-            const alreadyHashed =
-              user.password_hash.startsWith("$2a$") ||
-              user.password_hash.startsWith("$2b$");
-            if (!alreadyHashed) {
-              user.password_hash = await bcrypt.hash(user.password_hash, 10);
-            }
-          }
-        },
-        beforeUpdate: async (user) => {
-          if (user.changed("password_hash")) {
-            const value = user.password_hash;
-            const alreadyHashed =
-              value.startsWith("$2a$") || value.startsWith("$2b$");
-            if (!alreadyHashed) {
-              const bcrypt = require("bcryptjs");
-              user.password_hash = await bcrypt.hash(value, 10);
-            }
-          }
-        },
-      },
-      indexes: [
-        { unique: true, fields: ["email"] },
-        { unique: true, fields: ["phone_number"] },
-        { fields: ["role"] },
-        { fields: ["account_status"] },
-        { fields: ["pharmacy_id"] },
-      ],
-    },
-  );
+const MedicalRecord         = require("./medical_records.js");
+const SymptomSessions       = require("./symptom_sessions.js");
+const SavedLocations        = require("./saved_locations.js");
+const RefreshTokens         = require("./refresh_tokens.js");
 
-  User.prototype.comparePassword = async function (password) {
-  return bcrypt.compare(password, this.password_hash);
+const ManualMedicine        = require("./manual_medicine.js");
+
+const AuditLog               = require("./audit_logs.js");
+
+
+
+// ─── Initialize Models ─────────────────────────────────────────
+const models = {
+  User: User(sequelize),
+
+  ...Pharmacies(sequelize),          // Pharmacy, PharmacyHours
+  PharmacyRegistration: PharmacyRegistration(sequelize),
+  OTPVerification: OTPVerification(sequelize),
+
+  ...Appointments(sequelize),        // Appointment, AppointmentSlot
+  ...Consultations(sequelize),       // Consultation, ClinicalNote
+
+  Message: Message(sequelize),
+  Vital: Vital(sequelize),
+  LabOrder: LabOrder(sequelize),
+  Prescription: Prescription(sequelize),
+
+  Order: Order(sequelize),
+  Delivery: Delivery(sequelize),
+  Receipt: Receipt(sequelize),
+
+  ...Drugs(sequelize),  
+  PatientMedication: PatientMedication(sequelize),             // Drug, StockBatch
+  Supplier: Supplier(sequelize),
+  ...BulkOrders(sequelize),          // BulkOrder, BulkOrderItem
+
+  Wallet: Wallet(sequelize),
+  Transaction: Transaction(sequelize),
+
+  ...Notifications(sequelize),       // Notification, NotificationPreference
+  BroadcastAnnouncement: BroadcastAnnouncement(sequelize),
+
+  Issue: Issue(sequelize),
+
+  MedicalRecord: MedicalRecord(sequelize),
+  ...SymptomSessions(sequelize),
+  SavedLocation: SavedLocations(sequelize),
+  RefreshToken: RefreshTokens(sequelize),
+
+  ManualMedicine: ManualMedicine(sequelize),
+
+  AuditLog: AuditLog(sequelize),
 };
 
-// OTP VERIFICATION
-const OTPVerification = sequelize.define('OTPVerification', {
-  id:         { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
-  phone:      { type: DataTypes.STRING(20) },
-  email:      { type: DataTypes.STRING(255) },
-  otp_code:   { type: DataTypes.STRING(6), allowNull: false },
-  purpose:    { type: DataTypes.ENUM('registration','login','password_reset','delivery_confirmation'), allowNull: false },
-  is_used:    { type: DataTypes.BOOLEAN, defaultValue: false },
-  expires_at: { type: DataTypes.DATE, allowNull: false },
-}, {
-  tableName: 'otp_verifications',
-  timestamps: true,
-  underscored: true,
-});
-
-// PHARMACY
-const Pharmacy = sequelize.define('Pharmacy', {
-  id:               { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
-  name:             { type: DataTypes.STRING(255), allowNull: false },
-  email:            { type: DataTypes.STRING(255), allowNull: false },
-  phone:            { type: DataTypes.STRING(20), allowNull: false },
-  logo:             { type: DataTypes.STRING(500) },
-  address_line1:    { type: DataTypes.STRING(255), allowNull: false },
-  address_line2:    { type: DataTypes.STRING(255) },
-  county:           { type: DataTypes.STRING(100), allowNull: false },
-  sub_county:       { type: DataTypes.STRING(100) },
-  gps_lat:          { type: DataTypes.DECIMAL(9, 6) },
-  gps_lng:          { type: DataTypes.DECIMAL(9, 6) },
-  license_number:   { type: DataTypes.STRING(100), allowNull: false },
-  license_expiry:   { type: DataTypes.DATEONLY, allowNull: false },
-  delivery_zones:   { type: DataTypes.JSON, defaultValue: [] },
-  is_24hr:          { type: DataTypes.BOOLEAN, defaultValue: false },
-  is_active:        { type: DataTypes.BOOLEAN, defaultValue: true },
-}, {
-  tableName: 'pharmacies',
-  timestamps: true,
-  underscored: true,
-});
-
-// APPOINTMENT
-const Appointment = sequelize.define("Appointment", {
-
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: UUIDV4,
-      primaryKey: true,
-    },
-
-    // ─── Relationships ───────────────────────────────────────
-    doctor_id: {
-      type: DataTypes.UUID,
-      allowNull: false,                 // FK → users.id (role = doctor)
-    },
-    patient_id: {
-      type: DataTypes.UUID,
-      allowNull: false,                 // FK → users.id (role = patient)
-    },
-
-    // ─── Scheduling ──────────────────────────────────────────
-    date: {
-      type: DataTypes.DATEONLY,
-      allowNull: false,
-    },
-    time: {
-      type: DataTypes.STRING(10),       // e.g. "09:00 AM"
-      allowNull: false,
-    },
-    duration: {
-      type: DataTypes.INTEGER,          // in minutes
-      defaultValue: 30,
-    },
-
-    // ─── Details ─────────────────────────────────────────────
-    type: {
-      type: DataTypes.ENUM("in_person", "video"),
-      allowNull: false,
-    },
-    reason: {
-      type: DataTypes.TEXT,
-    },
-    priority: {
-      type: DataTypes.ENUM("urgent", "normal"),
-      defaultValue: "normal",
-    },
-    status: {
-      type: DataTypes.ENUM(
-        "pending",
-        "confirmed",
-        "cancelled",
-        "completed",
-        "no_show"
-      ),
-      defaultValue: "pending",
-      allowNull: false,
-    },
-    charges: {
-      type: DataTypes.DECIMAL(10, 2),
-    },
-
-  }, {
-    tableName: "appointments",
-    timestamps: true,
-    underscored: true,
-    indexes: [
-      { fields: ["doctor_id"] },
-      { fields: ["patient_id"] },
-      { fields: ["date"] },
-      { fields: ["status"] },
-      { fields: ["type"] },
-    ],
-  });
-
-// APPOINTMENT SLOT
-const AppointmentSlot = sequelize.define("AppointmentSlot", {
-
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: UUIDV4,
-      primaryKey: true,
-    },
-    doctor_id: {
-      type: DataTypes.UUID,
-      allowNull: false,                 // FK → users.id (role = doctor)
-    },
-    date: {
-      type: DataTypes.DATEONLY,
-      allowNull: false,
-    },
-    time: {
-      type: DataTypes.STRING(10),       // e.g. "09:00 AM"
-      allowNull: false,
-    },
-    slot_duration: {
-      type: DataTypes.INTEGER,
-      defaultValue: 30,                 // in minutes
-    },
-    is_available: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: true,
-    },
-
-  }, {
-    tableName: "appointment_slots",
-    timestamps: true,
-    underscored: true,
-    indexes: [
-      { fields: ["doctor_id"] },
-      { fields: ["date"] },
-      { fields: ["is_available"] },
-      { unique: true, fields: ["doctor_id", "date", "time"] },
-    ],
-  });
-
-
-// CONSULTATION
-const Consultation = sequelize.define('Consultation', {
-  id:             { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
-  appointment_id: { type: DataTypes.UUID, allowNull: false, unique: true },
-  doctor_id:      { type: DataTypes.UUID, allowNull: false },
-  patient_id:     { type: DataTypes.UUID, allowNull: false },
-  status:         { type: DataTypes.ENUM('active','completed','abandoned'), defaultValue: 'active', allowNull: false },
-  meeting_url:    { type: DataTypes.STRING(500) },
-  start_time:     { type: DataTypes.DATE, allowNull: false },
-  end_time:       { type: DataTypes.DATE },
-  symptoms:       { type: DataTypes.TEXT },
-  controls:       { type: DataTypes.JSON },
-}, {
-  tableName: 'consultations',
-  timestamps: true,
-  underscored: true,
-});
-
-// VITALS
-const Vital = sequelize.define('Vital', {
-  id:                       { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
-  patient_id:               { type: DataTypes.UUID, allowNull: false },
-  consultation_id:          { type: DataTypes.UUID },
-  recorded_by:              { type: DataTypes.UUID },
-  heart_rate:               { type: DataTypes.INTEGER },
-  blood_pressure_systolic:  { type: DataTypes.INTEGER },
-  blood_pressure_diastolic: { type: DataTypes.INTEGER },
-  blood_glucose:            { type: DataTypes.DECIMAL(5, 2) },
-  temperature:              { type: DataTypes.DECIMAL(4, 1) },
-  oxygen_saturation:        { type: DataTypes.DECIMAL(4, 1) },
-  weight:                   { type: DataTypes.DECIMAL(5, 1) },
-  height:                   { type: DataTypes.DECIMAL(5, 1) },
-  recorded_at:              { type: DataTypes.DATE, defaultValue: DataTypes.NOW, allowNull: false },
-}, {
-  tableName: 'vitals',
-  timestamps: true,
-  underscored: true,
-});
-
-// NOTIFICATION
-const Notification = sequelize.define('Notification', {
-  id:                { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
-  user_id:           { type: DataTypes.UUID, allowNull: false },
-  title:             { type: DataTypes.STRING(255), allowNull: false },
-  message:           { type: DataTypes.TEXT, allowNull: false },
-  notification_type: { type: DataTypes.ENUM('appointment','prescription','order','delivery','payment','low_stock','expiry_alert','broadcast','system','chat'), allowNull: false },
-  channel:           { type: DataTypes.ENUM('sms','email','push','in_app'), defaultValue: 'in_app', allowNull: false },
-  reference_id:      { type: DataTypes.UUID },
-  reference_type:    { type: DataTypes.STRING(50) },
-  broadcast_id:      { type: DataTypes.UUID },
-  is_read:           { type: DataTypes.BOOLEAN, defaultValue: false },
-  read_at:           { type: DataTypes.DATE },
-  sent_at:           { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
-}, {
-  tableName: 'notifications',
-  timestamps: true,
-  underscored: true,
-});
-
-// NOTIFICATION PREFERENCES
-const NotificationPreference = sequelize.define('NotificationPreference', {
-  id:                   { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
-  user_id:              { type: DataTypes.UUID, allowNull: false, unique: true },
-  sms_enabled:          { type: DataTypes.BOOLEAN, defaultValue: true },
-  email_enabled:        { type: DataTypes.BOOLEAN, defaultValue: true },
-  push_enabled:         { type: DataTypes.BOOLEAN, defaultValue: true },
-  in_app_enabled:       { type: DataTypes.BOOLEAN, defaultValue: true },
-  appointment_alerts:   { type: DataTypes.BOOLEAN, defaultValue: true },
-  prescription_alerts:  { type: DataTypes.BOOLEAN, defaultValue: true },
-  payment_alerts:       { type: DataTypes.BOOLEAN, defaultValue: true },
-  delivery_alerts:      { type: DataTypes.BOOLEAN, defaultValue: true },
-  chat_alerts:          { type: DataTypes.BOOLEAN, defaultValue: true },
-  broadcast_alerts:     { type: DataTypes.BOOLEAN, defaultValue: true },
-  low_stock_alerts:     { type: DataTypes.BOOLEAN, defaultValue: true },
-  expiry_alerts:        { type: DataTypes.BOOLEAN, defaultValue: true },
-  expiry_alert_days:    { type: DataTypes.INTEGER, defaultValue: 14 },
-}, {
-  tableName: 'notification_preferences',
-  timestamps: true,
-  underscored: true,
-});
-
-// PRESCRIPTION
-const Prescription = sequelize.define("Prescription", {
-
-    // ─── Identity ──────────────────────────────────────────────
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: UUIDV4,
-      primaryKey: true,
-    },
-    prescription_number: {
-      type: DataTypes.STRING(100),
-      unique: true,                     // human-readable ref e.g. RX-0001
-    },
-
-    // ─── Relationships ─────────────────────────────────────────
-    patient_id: {
-      type: DataTypes.UUID,
-      allowNull: false,                 // FK → users.id (role = patient)
-    },
-    doctor_id: {
-      type: DataTypes.UUID,
-      allowNull: false,                 // FK → users.id (role = doctor)
-    },
-    pharmacy_id: {
-      type: DataTypes.UUID,             // FK → pharmacies.id — set when pharmacy receives it
-    },
-    dispensed_by: {
-      type: DataTypes.UUID,             // FK → users.id (role = pharmacist) — set on dispense
-    },
-
-    // ─── Snapshot Fields (denormalized for record integrity) ───
-    patient_name: {
-      type: DataTypes.STRING(255),
-      allowNull: false,
-    },
-    patient_phone: {
-      type: DataTypes.STRING(20),
-    },
-    patient_address: {
-      type: DataTypes.STRING(255),
-    },
-    doctor_name: {
-      type: DataTypes.STRING(255),
-      allowNull: false,
-    },
-
-    // ─── Prescription Details ──────────────────────────────────
-    diagnosis: {
-      type: DataTypes.TEXT,
-    },
-    notes: {
-      type: DataTypes.TEXT,
-    },
-    issue_date: {
-      type: DataTypes.DATEONLY,
-      allowNull: false,
-    },
-    expiry_date: {
-      type: DataTypes.DATEONLY,
-    },
-    items: {
-      type: DataTypes.JSON,
-      allowNull: false,
-      defaultValue: [],
-    },
-
-    // ─── Lifecycle Status ──────────────────────────────────────
-    status: {
-      type: DataTypes.ENUM(
-        "draft",          // doctor started but not submitted
-        "pending",        // submitted by doctor, awaiting pharmacy
-        "validated",      // pharmacy confirmed it is legitimate
-        "rejected",       // pharmacy rejected (invalid/expired/etc)
-        "dispensed",      // pharmacy has dispensed the medication
-        "delivered"       // delivered to patient
-      ),
-      defaultValue: "draft",
-      allowNull: false,
-    },
-    priority: {
-      type: DataTypes.ENUM("normal", "urgent"),
-      defaultValue: "normal",
-    },
-    rejection_reason: {
-      type: DataTypes.TEXT,             // nullable — set only on rejection
-    },
-
-    // ─── Dispensing Info ───────────────────────────────────────
-    dispensed_at: {
-      type: DataTypes.DATE,             // nullable — set when dispensed
-    },
-    make_order: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false,              
-    }
-
-  }, {
-    tableName: "prescriptions",
-    timestamps: true,
-    underscored: true,
-    indexes: [
-      { fields: ["patient_id"] },
-      { fields: ["doctor_id"] },
-      { fields: ["pharmacy_id"] },
-      { fields: ["status"] },
-      { unique: true, fields: ["prescription_number"] },
-    ],
-  });
-// ORDER
-const Order = sequelize.define("Order", {
-
-    // ─── Identity ──────────────────────────────────────────────
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: UUIDV4,
-      primaryKey: true,
-    },
-    order_number: {
-      type: DataTypes.STRING(100),
-      unique: true,
-      allowNull: false,
-    },
-
-    // ─── Relationships ─────────────────────────────────────────
-    prescription_id: {
-      type: DataTypes.UUID,             // FK → prescriptions.id (nullable — walk-in orders)
-    },
-    pharmacy_id: {
-      type: DataTypes.UUID,
-      allowNull: false,                 // FK → pharmacies.id
-    },
-    prepared_by: {
-      type: DataTypes.UUID,             // FK → users.id (role = pharmacist)
-    },
-
-    // ─── Patient Snapshot ──────────────────────────────────────
-    patient_id: {
-      type: DataTypes.UUID,             // FK → users.id (role = patient)
-    },
-    patient_name: {
-      type: DataTypes.STRING(255),
-      allowNull: false,
-    },
-    patient_phone: {
-      type: DataTypes.STRING(20),
-    },
-    patient_address: {
-      type: DataTypes.TEXT,
-    },
-
-    // ─── Order Details ─────────────────────────────────────────
-    delivery_type: {
-      type: DataTypes.ENUM("pickup", "home_delivery"),
-      defaultValue: "pickup",
-      allowNull: false,
-    },
-    priority: {
-      type: DataTypes.ENUM("urgent", "normal"),
-      defaultValue: "normal",
-    },
-    status: {
-      type: DataTypes.ENUM(
-        "pending",
-        "processing",
-        "ready",
-        "dispatched",
-        "delivered",
-        "cancelled"
-      ),
-      defaultValue: "pending",
-      allowNull: false,
-    },
-
-    // ─── Payment ───────────────────────────────────────────────
-    total_amount: {
-      type: DataTypes.DECIMAL(10, 2),
-      defaultValue: 0,
-    },
-    payment_status: {
-      type: DataTypes.ENUM("unpaid", "paid", "refunded"),
-      defaultValue: "unpaid",
-    },
-    payment_method: {
-      type: DataTypes.ENUM("mpesa", "cash", "insurance", "nhif"),
-    },
-    mpesa_ref: {
-      type: DataTypes.STRING(50),
-    },
-
-  }, {
-    tableName: "orders",
-    timestamps: true,
-    underscored: true,
-    indexes: [
-      { unique: true, fields: ["order_number"] },
-      { fields: ["prescription_id"] },
-      { fields: ["pharmacy_id"] },
-      { fields: ["patient_id"] },
-      { fields: ["status"] },
-      { fields: ["payment_status"] },
-    ],
-  });
-
-// DELIVERY
-const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
-
-const Delivery = sequelize.define('Delivery', {
-  id:                      { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
-  package_number:          { type: DataTypes.STRING(100), unique: true, allowNull: false },
-  order_id:                { type: DataTypes.UUID, allowNull: false, unique: true },
-  rider_id:                { type: DataTypes.UUID },
-  status:                  { type: DataTypes.ENUM('pending','assigned','accepted','picked_up','out_for_delivery','delivered','failed','cancelled'), defaultValue: 'pending', allowNull: false },
-  accept_status:           { type: DataTypes.BOOLEAN, defaultValue: false },
-  pickup_location:         { type: DataTypes.STRING(255) },
-  pickup_lat:              { type: DataTypes.DECIMAL(9, 6) },
-  pickup_lng:              { type: DataTypes.DECIMAL(9, 6) },
-  pickup_contact:          { type: DataTypes.STRING(20) },
-  pickup_time:             { type: DataTypes.DATE },
-  dropoff_location:        { type: DataTypes.STRING(255) },
-  dropoff_lat:             { type: DataTypes.DECIMAL(9, 6) },
-  dropoff_lng:             { type: DataTypes.DECIMAL(9, 6) },
-  receiver_contact:        { type: DataTypes.STRING(20) },
-  requirement:             { type: DataTypes.STRING(255) },
-  estimated_delivery_time: { type: DataTypes.STRING(100) },
-  distance:                { type: DataTypes.FLOAT },
-  charges:                 { type: DataTypes.DECIMAL(10, 2) },
-  delivery_zone:           { type: DataTypes.STRING(100) },
-  delivery_notes:          { type: DataTypes.TEXT },
-  otp_code:                { type: DataTypes.STRING(6), defaultValue: generateOTP },
-  delivered_at:            { type: DataTypes.DATE },
-  date_approved:           { type: DataTypes.DATE },
-}, {
-  tableName: 'deliveries',
-  timestamps: true,
-  underscored: true,
-});
-
-const Wallet = sequelize.define("Wallet", {
-
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: UUIDV4,
-      primaryKey: true,
-    },
-    user_id: {
-      type: DataTypes.UUID,
-      allowNull: false,
-      unique: true,                     // FK → users.id (one wallet per user)
-    },
-    balance: {
-      type: DataTypes.DECIMAL(12, 2),
-      defaultValue: 0,
-      allowNull: false,
-    },
-
-    currency: {
-      type: DataTypes.STRING(10),
-      defaultValue: "KES",
-    },
-    is_active: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: true,
-    },
-    payout_method: {
-      type: DataTypes.ENUM("mpesa", "bank"),
-    },
-    payout_account: {
-      type: DataTypes.STRING(100),      
-    },
-
-  }, {
-    tableName: "wallets",
-    timestamps: true,
-    underscored: true,
-    indexes: [
-      { unique: true, fields: ["user_id"] },
-      { fields: ["is_active"] },
-    ],
-  });
-
-// TRANSACTION
-const Transaction = sequelize.define("Transaction", {
-
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: UUIDV4,
-      primaryKey: true,
-    },
-
-    // ─── Wallet / User ───────────────────────────────────────
-    wallet_id: {
-      type: DataTypes.UUID,
-      allowNull: false,                 // FK → wallets.id
-    },
-    user_id: {
-      type: DataTypes.UUID,
-      allowNull: false,                 // FK → users.id (denormalized for easy querying)
-    },
-
-    // ─── Amount ──────────────────────────────────────────────
-    amount: {
-      type: DataTypes.DECIMAL(12, 2),
-      allowNull: false,
-    },
-    currency: {
-      type: DataTypes.STRING(10),
-      defaultValue: "KES",
-    },
-
-    // ─── Type ────────────────────────────────────────────────
-    type: {
-      type: DataTypes.ENUM("credit", "debit"),
-      allowNull: false,
-    },
-
-    // ─── Category ────────────────────────────────────────────
-    // What triggered this transaction
-    category: {
-      type: DataTypes.ENUM(
-        "consultation_fee",             // doctor receives from patient
-        "order_payment",                // pharmacy receives from patient
-        "delivery_fee",                 // rider earns per delivery
-        "payout",                       // rider / pharmacist withdrawal
-        "refund",                       // patient refunded
-        "platform_fee",                 // platform deducts commission
-        "top_up",                       // user adds funds
-        "adjustment"                    // manual admin correction
-      ),
-      allowNull: false,
-    },
-
-    // ─── Status ──────────────────────────────────────────────
-    status: {
-      type: DataTypes.ENUM("pending", "completed", "failed", "reversed"),
-      defaultValue: "pending",
-      allowNull: false,
-    },
-
-    // ─── Reference (what triggered this transaction) ─────────
-    reference_id: {
-      type: DataTypes.UUID,             // e.g. order_id, delivery_id, appointment_id
-    },
-    reference_type: {
-      type: DataTypes.STRING(50),       // e.g. "order", "delivery", "appointment"
-    },
-
-    // ─── Payment Details ─────────────────────────────────────
-    payment_method: {
-      type: DataTypes.ENUM("mpesa", "cash", "insurance", "nhif", "wallet"),
-    },
-    mpesa_ref: {
-      type: DataTypes.STRING(100),      // M-Pesa transaction code
-    },
-
-    // ─── Balance Snapshot ────────────────────────────────────
-    // Balance on the wallet AFTER this transaction was applied.
-    // Useful for statement generation without re-computing history.
-    balance_after: {
-      type: DataTypes.DECIMAL(12, 2),
-    },
-
-    // ─── Notes ───────────────────────────────────────────────
-    description: {
-      type: DataTypes.STRING(255),      // human readable e.g. "Payment for Order #00123"
-    },
-
-    // ─── Timestamps ──────────────────────────────────────────
-    transacted_at: {
-      type: DataTypes.DATE,
-      defaultValue: DataTypes.NOW,
-    },
-
-  }, {
-    tableName: "transactions",
-    timestamps: true,
-    underscored: true,
-    indexes: [
-      { fields: ["wallet_id"] },
-      { fields: ["user_id"] },
-      { fields: ["type"] },
-      { fields: ["category"] },
-      { fields: ["status"] },
-      { fields: ["reference_id", "reference_type"] },
-      { fields: ["transacted_at"] },    // for trend/date range queries
-      { fields: ["payment_method"] },
-    ],
-  });
-
-
-// REFRESH TOKEN
-// Stores issued refresh tokens for session management and revocation.
-const RefreshToken = sequelize.define("RefreshToken", {
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: UUIDV4,
-      primaryKey: true,
-    },
-    token: {
-      type: DataTypes.TEXT,
-      allowNull: false,
-    },
-    user_id: { 
-      type: DataTypes.UUID,
-      allowNull: false,                 // FK → users.id (any role)
-    },
-    device_id: {
-      type: DataTypes.STRING(100),
-    },
-    platform: {
-      type: DataTypes.STRING(20),       // e.g. ios, android, web
-    },
-    expires_at: {
-      type: DataTypes.DATE,
-      allowNull: false,
-    },
-    revoked: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false,
-    },
-  }, {
-    tableName: "refresh_tokens",
-    timestamps: true,
-    underscored: true,
-    indexes: [
-      { fields: ["user_id"] },
-      { fields: ["revoked"] },
-      { fields: ["expires_at"] },
-    ],
-  });
-
-// SYMPTOM SESSION
-// One session per patient symptom-checker conversation.
-const SymptomSession = sequelize.define("SymptomSession", {
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: UUIDV4,
-      primaryKey: true,
-    },
-    user_id: {
-      type: DataTypes.UUID,
-      allowNull: false,                 // FK → users.id (role = patient)
-    },
-    status: {
-      type: DataTypes.ENUM("active", "ended"),
-      defaultValue: "active",
-    },
-    disclaimer_accepted: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false,
-    },
-    consent_to_ai_analysis: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false,
-    },
-  }, {
-    tableName: "symptom_sessions",
-    timestamps: true,
-    underscored: true,
-    indexes: [
-      { fields: ["user_id"] },
-      { fields: ["status"] },
-    ],
-  });
-
-
-// SYMPTOM MESSAGE
-// Individual messages within a SymptomSession.
-const SymptomMessage = sequelize.define("SymptomMessage", {
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: UUIDV4,
-      primaryKey: true,
-    },
-    session_id: {
-      type: DataTypes.UUID,
-      allowNull: false,                 
-    },
-    sender: {
-      type: DataTypes.ENUM("patient", "ai"),
-      allowNull: false,
-    },
-    message: {
-      type: DataTypes.TEXT,
-      allowNull: false,
-    },
-    suggested_actions: {
-      type: DataTypes.JSON,             
-    },
-  }, {
-    tableName: "symptom_messages",
-    timestamps: true,
-    underscored: true,
-    indexes: [
-      { fields: ["session_id"] },
-      { fields: ["sender"] },
-    ],
-  });
-
-// MEDICAL RECORD
-// Dedicated table for patient medical records / visit history.
-// Replaces the old visits JSON column on users.
-const MedicalRecord = sequelize.define("MedicalRecord", {
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: UUIDV4,
-      primaryKey: true,
-    },
-    user_id: {
-      type: DataTypes.UUID,
-      allowNull: false,                 // FK → users.id (role = patient)
-    },
-    type: {
-      type: DataTypes.ENUM(
-        "lab",
-        "vaccination",
-        "consultation",
-        "prescription",
-        "imaging"
-      ),
-      allowNull: false,
-    },
-    title: {
-      type: DataTypes.STRING(150),
-      allowNull: false,
-    },
-    facility: {
-      type: DataTypes.STRING(150),
-    },
-    file_url: {
-      type: DataTypes.STRING(500),
-    },
-    date: {
-      type: DataTypes.DATEONLY,
-    },
-  }, {
-    tableName: "medical_records",
-    timestamps: true,
-    underscored: true,
-    indexes: [
-      { fields: ["user_id"] },
-      { fields: ["type"] },
-      { fields: ["date"] },
-    ],
-  });
-
-// SAVED LOCATION
-// Patient-saved addresses (Home, Work, custom labels).
-const SavedLocation = sequelize.define("SavedLocation", {
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: UUIDV4,
-      primaryKey: true,
-    },
-    user_id: {
-      type: DataTypes.UUID,
-      allowNull: false,                 // FK → users.id (role = patient)
-    },
-    label: {
-      type: DataTypes.ENUM("Home", "Work", "Other"),
-      defaultValue: "Home",
-    },
-    address: {
-      type: DataTypes.STRING(255),
-    },
-    latitude: {
-      type: DataTypes.DECIMAL(10, 8),
-    },
-    longitude: {
-      type: DataTypes.DECIMAL(11, 8),
-    },
-    is_default: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false,
-    },
-  }, {
-    tableName: "saved_locations",
-    timestamps: true,
-    underscored: true,
-    indexes: [
-      { fields: ["user_id"] },
-    ],
-  });
 
 // ASSOCIATIONS
 
-// User → RefreshTokens
-User.hasMany(RefreshToken, { foreignKey: 'user_id' });
-RefreshToken.belongsTo(User, { foreignKey: 'user_id' });
+// ─── User ──────────────────────────────────────────────────────
+models.User.hasOne(models.Wallet, { foreignKey: "user_id" });
+models.Wallet.belongsTo(models.User, { foreignKey: "user_id" });
 
-// User → SymptomSessions → SymptomMessages
-  User.hasMany(SymptomSession, { foreignKey: 'user_id', as: 'symptom_sessions' });
-  SymptomSession.belongsTo(User, { foreignKey: 'user_id' });
-  SymptomSession.hasMany(SymptomMessage, { foreignKey: "session_id" });
-  SymptomMessage.belongsTo(SymptomSession, { foreignKey: "session_id" });
+models.User.hasMany(models.Transaction, { foreignKey: "user_id" });
+models.Transaction.belongsTo(models.User, { foreignKey: "user_id" });
 
-// User → MedicalRecords
-User.hasMany(MedicalRecord, { foreignKey: 'user_id', as: 'medical_records' });
-MedicalRecord.belongsTo(User, { foreignKey: 'user_id'});
+models.User.hasOne(models.NotificationPreference, { foreignKey: "user_id" });
+models.NotificationPreference.belongsTo(models.User, { foreignKey: "user_id" });
 
-// User → SavedLocations
-User.hasMany(SavedLocation, { foreignKey: 'user_id', as: 'saved_locations' });
-SavedLocation.belongsTo(User, { foreignKey: 'user_id'});
+models.User.hasMany(models.Notification, { foreignKey: "user_id" });
+models.Notification.belongsTo(models.User, { foreignKey: "user_id" });
+
+models.User.hasMany(models.Issue, { foreignKey: "user_id", as: "raised_issues" });
+models.Issue.belongsTo(models.User, { foreignKey: "user_id", as: "raised_by" });
+
+models.User.hasMany(models.Issue, { foreignKey: "resolved_by", as: "resolved_issues" });
+models.Issue.belongsTo(models.User, { foreignKey: "resolved_by", as: "resolved_by_user" });
 
 
-User.hasOne(Wallet, { foreignKey: 'user_id' });
-Wallet.belongsTo(User, { foreignKey: 'user_id' });
+// ─── Pharmacy ──────────────────────────────────────────────────
+models.Pharmacy.hasMany(models.PharmacyHours, { foreignKey: "pharmacy_id" });
+models.PharmacyHours.belongsTo(models.Pharmacy, { foreignKey: "pharmacy_id" });
 
-User.hasMany(Transaction, { foreignKey: 'user_id' });
-Transaction.belongsTo(User, { foreignKey: 'user_id' });
-Wallet.hasMany(Transaction, { foreignKey: 'wallet_id' });
-Transaction.belongsTo(Wallet, { foreignKey: 'wallet_id' });
+models.Pharmacy.hasMany(models.User, { foreignKey: "pharmacy_id", as: "staff" });
+models.User.belongsTo(models.Pharmacy, { foreignKey: "pharmacy_id" });
 
-User.hasOne(NotificationPreference, { foreignKey: 'user_id' });
-NotificationPreference.belongsTo(User, { foreignKey: 'user_id' });
+models.Pharmacy.hasMany(models.Drug, { foreignKey: "pharmacy_id" });
+models.Drug.belongsTo(models.Pharmacy, { foreignKey: "pharmacy_id" });
 
-User.hasMany(Notification, { foreignKey: 'user_id' });
-Notification.belongsTo(User, { foreignKey: 'user_id' });
+models.Pharmacy.hasMany(models.Order, { foreignKey: "pharmacy_id" });
+models.Order.belongsTo(models.Pharmacy, { foreignKey: "pharmacy_id" });
 
-// User → Appointments (as patient and as doctor)
-User.hasMany(Appointment, { foreignKey: 'patient_id', as: 'patient_appointments' });
-User.hasMany(Appointment, { foreignKey: 'doctor_id', as: 'doctor_appointments' });
-Appointment.belongsTo(User, { foreignKey: 'patient_id', as: 'patient' });
-Appointment.belongsTo(User, { foreignKey: 'doctor_id', as: 'doctor' });
+models.Pharmacy.hasMany(models.Prescription, { foreignKey: "pharmacy_id" });
+models.Prescription.belongsTo(models.Pharmacy, { foreignKey: "pharmacy_id" });
 
-// User → AppointmentSlots
-User.hasMany(AppointmentSlot, { foreignKey: 'doctor_id', as: 'slots' });
-AppointmentSlot.belongsTo(User, { foreignKey: 'doctor_id', as: 'doctor' });
+models.Pharmacy.hasMany(models.BulkOrder, { foreignKey: "pharmacy_id" });
+models.BulkOrder.belongsTo(models.Pharmacy, { foreignKey: "pharmacy_id" });
 
-// Appointment → Consultation
-Appointment.hasOne(Consultation, { foreignKey: 'appointment_id' });
-Consultation.belongsTo(Appointment, { foreignKey: 'appointment_id' });
-User.hasMany(Consultation, { foreignKey: 'patient_id', as: 'patient_consultations' });
-User.hasMany(Consultation, { foreignKey: 'doctor_id', as: 'doctor_consultations' });
-Consultation.belongsTo(User, { foreignKey: 'patient_id', as: 'patient' });
-Consultation.belongsTo(User, { foreignKey: 'doctor_id', as: 'doctor' });
+models.User.hasMany(models.PharmacyRegistration, { foreignKey: "reviewed_by", as: "reviewed_registrations" });
+models.PharmacyRegistration.belongsTo(models.User, { foreignKey: "reviewed_by", as: "reviewer" });
 
-// User → Vitals
-User.hasMany(Vital, { foreignKey: 'patient_id', as: 'vitals' });
-Vital.belongsTo(User, { foreignKey: 'patient_id', as: 'patient' });
-Consultation.hasMany(Vital, { foreignKey: 'consultation_id' });
-Vital.belongsTo(Consultation, { foreignKey: 'consultation_id' });
 
-// User → Prescriptions
-User.hasMany(Prescription, { foreignKey: 'patient_id', as: 'patient_prescriptions' });
-User.hasMany(Prescription, { foreignKey: 'doctor_id', as: 'written_prescriptions' });
-Prescription.belongsTo(User, { foreignKey: 'patient_id', as: 'patient' });
-Prescription.belongsTo(User, { foreignKey: 'doctor_id', as: 'doctor' });
-Pharmacy.hasMany(Prescription, { foreignKey: 'pharmacy_id' });
-Prescription.belongsTo(Pharmacy, { foreignKey: 'pharmacy_id' });
+// ─── Appointments ──────────────────────────────────────────────
+models.User.hasMany(models.Appointment, { foreignKey: "doctor_id", as: "doctor_appointments" });
+models.Appointment.belongsTo(models.User, { foreignKey: "doctor_id", as: "doctor" });
 
-// Prescription → Order → Delivery
-Prescription.hasOne(Order, { foreignKey: 'prescription_id' });
-Order.belongsTo(Prescription, { foreignKey: 'prescription_id' });
-User.hasMany(Order, { foreignKey: 'patient_id', as: 'patient_orders' });
-Order.belongsTo(User, { foreignKey: 'patient_id', as: 'patient' });
-Pharmacy.hasMany(Order, { foreignKey: 'pharmacy_id' });
-Order.belongsTo(Pharmacy, { foreignKey: 'pharmacy_id' });
-Order.hasOne(Delivery, { foreignKey: 'order_id' });
-Delivery.belongsTo(Order, { foreignKey: 'order_id' });
-User.hasMany(Delivery, { foreignKey: 'rider_id', as: 'deliveries' });
-Delivery.belongsTo(User, { foreignKey: 'rider_id', as: 'rider' });
+models.User.hasMany(models.Appointment, { foreignKey: "patient_id", as: "patient_appointments" });
+models.Appointment.belongsTo(models.User, { foreignKey: "patient_id", as: "patient" });
+
+models.User.hasMany(models.AppointmentSlot, { foreignKey: "doctor_id", as: "slots" });
+models.AppointmentSlot.belongsTo(models.User, { foreignKey: "doctor_id", as: "doctor" });
+
+models.Appointment.hasOne(models.Consultation, { foreignKey: "appointment_id" });
+models.Consultation.belongsTo(models.Appointment, { foreignKey: "appointment_id" });
+
+
+// ─── Consultations ─────────────────────────────────────────────
+models.User.hasMany(models.Consultation, { foreignKey: "doctor_id", as: "doctor_consultations" });
+models.Consultation.belongsTo(models.User, { foreignKey: "doctor_id", as: "doctor" });
+
+models.User.hasMany(models.Consultation, { foreignKey: "patient_id", as: "patient_consultations" });
+models.Consultation.belongsTo(models.User, { foreignKey: "patient_id", as: "patient" });
+
+models.Consultation.hasOne(models.ClinicalNote, { foreignKey: "consultation_id" });
+models.ClinicalNote.belongsTo(models.Consultation, { foreignKey: "consultation_id" });
+
+models.Consultation.hasMany(models.Vital, { foreignKey: "consultation_id" });
+models.Vital.belongsTo(models.Consultation, { foreignKey: "consultation_id" });
+
+models.Consultation.hasMany(models.LabOrder, { foreignKey: "consultation_id" });
+models.LabOrder.belongsTo(models.Consultation, { foreignKey: "consultation_id" });
+
+
+// ─── Vitals ────────────────────────────────────────────────────
+models.User.hasMany(models.Vital, { foreignKey: "patient_id", as: "vitals" });
+models.Vital.belongsTo(models.User, { foreignKey: "patient_id", as: "patient" });
+
+models.User.hasMany(models.Vital, { foreignKey: "recorded_by", as: "recorded_vitals" });
+models.Vital.belongsTo(models.User, { foreignKey: "recorded_by", as: "recorded_by_doctor" });
+
+
+// ─── Lab Orders ────────────────────────────────────────────────
+models.User.hasMany(models.LabOrder, { foreignKey: "patient_id", as: "lab_orders" });
+models.LabOrder.belongsTo(models.User, { foreignKey: "patient_id", as: "patient" });
+
+models.User.hasMany(models.LabOrder, { foreignKey: "doctor_id", as: "issued_lab_orders" });
+models.LabOrder.belongsTo(models.User, { foreignKey: "doctor_id", as: "doctor" });
+
+
+// ─── Messages ──────────────────────────────────────────────────
+models.User.hasMany(models.Message, { foreignKey: "sender_id", as: "sent_messages" });
+models.Message.belongsTo(models.User, { foreignKey: "sender_id", as: "sender" });
+
+models.User.hasMany(models.Message, { foreignKey: "receiver_id", as: "received_messages" });
+models.Message.belongsTo(models.User, { foreignKey: "receiver_id", as: "receiver" });
+
+
+// ─── Prescriptions ─────────────────────────────────────────────
+models.User.hasMany(models.Prescription, { foreignKey: "doctor_id", as: "written_prescriptions" });
+models.Prescription.belongsTo(models.User, { foreignKey: "doctor_id", as: "doctor" });
+
+models.User.hasMany(models.Prescription, { foreignKey: "patient_id", as: "patient_prescriptions" });
+models.Prescription.belongsTo(models.User, { foreignKey: "patient_id", as: "patient" });
+
+models.User.hasMany(models.Prescription, { foreignKey: "dispensed_by", as: "dispensed_prescriptions" });
+models.Prescription.belongsTo(models.User, { foreignKey: "dispensed_by", as: "dispensed_by_user" });
+
+models.Prescription.hasOne(models.Order, { foreignKey: "prescription_id" });
+models.Order.belongsTo(models.Prescription, { foreignKey: "prescription_id" });
+
+
+// ─── Orders ────────────────────────────────────────────────────
+models.User.hasMany(models.Order, { foreignKey: "patient_id", as: "patient_orders" });
+models.Order.belongsTo(models.User, { foreignKey: "patient_id", as: "patient" });
+
+models.User.hasMany(models.Order, { foreignKey: "prepared_by", as: "prepared_orders" });
+models.Order.belongsTo(models.User, { foreignKey: "prepared_by", as: "prepared_by_user" });
+
+models.Order.hasOne(models.Delivery, { foreignKey: "order_id" });
+models.Delivery.belongsTo(models.Order, { foreignKey: "order_id" });
+
+models.Order.hasOne(models.Receipt, { foreignKey: "order_id" });
+models.Receipt.belongsTo(models.Order, { foreignKey: "order_id" });
+
+
+// ─── Deliveries ────────────────────────────────────────────────
+models.User.hasMany(models.Delivery, { foreignKey: "rider_id", as: "deliveries" });
+models.Delivery.belongsTo(models.User, { foreignKey: "rider_id", as: "rider" });
+
+
+// ─── Receipts ──────────────────────────────────────────────────
+models.User.hasMany(models.Receipt, { foreignKey: "dispensed_by", as: "receipts" });
+models.Receipt.belongsTo(models.User, { foreignKey: "dispensed_by", as: "dispensed_by_user" });
+
+
+// ─── Drugs & Stock ─────────────────────────────────────────────
+models.Drug.hasMany(models.StockBatch, { foreignKey: "drug_id" });
+models.StockBatch.belongsTo(models.Drug, { foreignKey: "drug_id" });
+
+models.Supplier.hasMany(models.StockBatch, { foreignKey: "supplier_id" });
+models.StockBatch.belongsTo(models.Supplier, { foreignKey: "supplier_id" });
+
+models.BulkOrder.hasMany(models.StockBatch, { foreignKey: "bulk_order_id" });
+models.StockBatch.belongsTo(models.BulkOrder, { foreignKey: "bulk_order_id" });
+
+models.User.hasMany(models.StockBatch, { foreignKey: "received_by", as: "received_batches" });
+models.StockBatch.belongsTo(models.User, { foreignKey: "received_by", as: "received_by_user" });
+
+
+// ─── Bulk Orders ───────────────────────────────────────────────
+models.Supplier.hasMany(models.BulkOrder, { foreignKey: "supplier_id" });
+models.BulkOrder.belongsTo(models.Supplier, { foreignKey: "supplier_id" });
+
+models.User.hasMany(models.BulkOrder, { foreignKey: "created_by", as: "created_bulk_orders" });
+models.BulkOrder.belongsTo(models.User, { foreignKey: "created_by", as: "created_by_user" });
+
+models.BulkOrder.hasMany(models.BulkOrderItem, { foreignKey: "bulk_order_id" });
+models.BulkOrderItem.belongsTo(models.BulkOrder, { foreignKey: "bulk_order_id" });
+
+models.Drug.hasMany(models.BulkOrderItem, { foreignKey: "drug_id" });
+models.BulkOrderItem.belongsTo(models.Drug, { foreignKey: "drug_id" });
+
+
+// ─── Wallets & Transactions ────────────────────────────────────
+models.Wallet.hasMany(models.Transaction, { foreignKey: "wallet_id" });
+models.Transaction.belongsTo(models.Wallet, { foreignKey: "wallet_id" });
+
+
+// ─── Broadcasts & Notifications ────────────────────────────────
+models.User.hasMany(models.BroadcastAnnouncement, { foreignKey: "admin_id", as: "broadcasts" });
+models.BroadcastAnnouncement.belongsTo(models.User, { foreignKey: "admin_id", as: "admin" });
+
+models.BroadcastAnnouncement.hasMany(models.Notification, { foreignKey: "broadcast_id" });
+models.Notification.belongsTo(models.BroadcastAnnouncement, { foreignKey: "broadcast_id" });
+
+models.User.hasMany(models.RefreshToken, { foreignKey: "user_id" });
+models.RefreshToken.belongsTo(models.User, { foreignKey: "user_id" });
+
+models.User.hasMany(models.MedicalRecord, { foreignKey: "user_id", as: "medical_records" });
+models.MedicalRecord.belongsTo(models.User, { foreignKey: "user_id" });
+
+models.User.hasMany(models.SavedLocation, { foreignKey: "user_id", as: "saved_locations" });
+models.SavedLocation.belongsTo(models.User, { foreignKey: "user_id" });
+
+models.User.hasMany(models.ManualMedicine, { foreignKey: "user_id", as: "manual_medicines" });
+models.ManualMedicine.belongsTo(models.User, { foreignKey: "user_id" });
+
+models.User.hasMany(models.SymptomSession, { foreignKey: "user_id", as: "symptom_sessions" });
+models.SymptomSession.belongsTo(models.User, { foreignKey: "user_id" });
+
+
+  // ─── Patient Medications ──────────────────────────────────────
+ 
+// Patient — a patient has many medications
+models.User.hasMany(models.PatientMedication, { foreignKey: "patient_id", as: "medications" });
+models.PatientMedication.belongsTo(models.User, { foreignKey: "patient_id", as: "patient" });
+ 
+// Prescribing doctor — a doctor has prescribed many medications
+models.User.hasMany(models.PatientMedication, { foreignKey: "prescribed_by", as: "prescribed_medications" });
+models.PatientMedication.belongsTo(models.User, { foreignKey: "prescribed_by", as: "prescribing_doctor" });
+ 
+// Dispensing pharmacist — a pharmacist has dispensed many medications
+models.User.hasMany(models.PatientMedication, { foreignKey: "dispensed_by", as: "dispensed_medications" });
+models.PatientMedication.belongsTo(models.User, { foreignKey: "dispensed_by", as: "dispensing_pharmacist" });
+ 
+// Prescription — one prescription can produce many patient medication records
+// (one per drug item in the prescription's items JSON)
+models.Prescription.hasMany(models.PatientMedication, { foreignKey: "prescription_id", as: "patient_medications" });
+models.PatientMedication.belongsTo(models.Prescription, { foreignKey: "prescription_id", as: "prescription" });
+ 
+// Pharmacy — a pharmacy has dispensed many patient medications
+models.Pharmacy.hasMany(models.PatientMedication, { foreignKey: "pharmacy_id", as: "dispensed_patient_medications" });
+models.PatientMedication.belongsTo(models.Pharmacy, { foreignKey: "pharmacy_id", as: "pharmacy" });
+ 
+// Drug — a drug catalogue entry can appear in many patient medication records
+models.Drug.hasMany(models.PatientMedication, { foreignKey: "drug_id", as: "patient_medication_records" });
+models.PatientMedication.belongsTo(models.Drug, { foreignKey: "drug_id", as: "drug" });
+
+
+// ─── Audit Logs ───────────────────────────────────────────────
+models.User.hasMany(models.AuditLog, { foreignKey: "admin_id", as: "audit_logs" });
+models.AuditLog.belongsTo(models.User, { foreignKey: "admin_id", as: "admin" });
+
 
 
 // ═══════════════════════════════════════════════════════════════
-// MESSAGE
-// Real-time direct messaging between patient and doctor.
-// patient_id + doctor_id index enables fast conversation lookup.
-// ═══════════════════════════════════════════════════════════════
-const Message = sequelize.define("Message", {
-
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: UUIDV4,
-      primaryKey: true,
-    },
-
-    // ─── Relationships ─────────────────────────────────────────
-    sender_id: {
-      type: DataTypes.UUID,
-      allowNull: false,                 // FK → users.id
-    },
-    receiver_id: {
-      type: DataTypes.UUID,
-      allowNull: false,                 // FK → users.id
-    },
-    consultation_id: {
-      type: DataTypes.UUID,             // FK → consultations.id (nullable — general chat)
-    },
-
-    // ─── Content ───────────────────────────────────────────────
-    content: {
-      type: DataTypes.TEXT,
-    },
-    type: {
-      type: DataTypes.ENUM("text", "image", "audio", "video", "file"),
-      defaultValue: "text",
-      allowNull: false,
-    },
-    file_url: {
-      type: DataTypes.STRING(500),      // path to uploaded media
-    },
-
-    // ─── Status ────────────────────────────────────────────────
-    is_read: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false,
-    },
-    read_at: {
-      type: DataTypes.DATE,
-    },
-
-  }, {
-    tableName: "messages",
-    timestamps: true,
-    underscored: true,
-    indexes: [
-      { fields: ["sender_id"] },
-      { fields: ["receiver_id"] },
-      { fields: ["consultation_id"] },
-      { fields: ["is_read"] },
-      { fields: ["sender_id", "receiver_id"] },
-    ],
-  });
-  
-// User → Messages
-User.hasMany(Message, { foreignKey: 'sender_id', as: 'sent_messages' });
-User.hasMany(Message, { foreignKey: 'receiver_id', as: 'received_messages' });
-Message.belongsTo(User, { foreignKey: 'sender_id', as: 'sender' });
-Message.belongsTo(User, { foreignKey: 'receiver_id', as: 'receiver' });
-
 // EXPORTS
+// ═══════════════════════════════════════════════════════════════
 module.exports = {
-  User,
-  Message,
-  OTPVerification,
-  RefreshToken,
-  SymptomSession,
-  SymptomMessage,
-  MedicalRecord,
-  SavedLocation,
-  Pharmacy,
-  Appointment,
-  AppointmentSlot,
-  Consultation,
-  Vital,
-  Notification,
-  NotificationPreference,
-  Prescription,
-  Order,
-  Delivery,
-  Wallet,
-  Transaction,
+  sequelize,
+  models,
 };

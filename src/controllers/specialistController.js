@@ -1,4 +1,4 @@
-const { User, AppointmentSlot, Appointment, Wallet, Transaction } = require('../models');
+const { models: {User, AppointmentSlot, Appointment, Wallet, Transaction} } = require('../models/index.js');
 const { successResponse, errorResponse } = require('../utils/response');
 const serviceClient = require('../utils/serviceClients');
 const { sequelize } = require('../config/database');

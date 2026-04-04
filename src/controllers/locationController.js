@@ -1,4 +1,4 @@
-const { SavedLocation, Order } = require('../models');
+const { models:{SavedLocation, Order} } = require('../models/index.js');
 const { successResponse, errorResponse } = require('../utils/response');
 
 // GET /locations/search

@@ -245,7 +245,34 @@ module.exports.appointmentRouter = appointmentRouter;
 const medsRouter = express.Router();
 const medsController = require("../controllers/medsController");
 
+// Dashboard — full slot-based daily summary
 medsRouter.get("/dashboard", authenticate, medsController.getMedsDashboard);
+
+// One-tap bulk slot update (taken / skipped)
+medsRouter.patch(
+  "/schedule/slot-update",
+  authenticate,
+  [
+    body("slot_id").notEmpty().withMessage("slot_id is required"),
+    body("status").isIn(["taken","skipped","snoozed","pending"]).withMessage("Invalid status"),
+    validate,
+  ],
+  medsController.bulkSlotUpdate,
+);
+
+// Inventory — stock levels + days_left
+medsRouter.get("/inventory", authenticate, medsController.getInventory);
+
+// Inventory refill trigger
+medsRouter.post(
+  "/inventory/refill",
+  authenticate,
+  [
+    body("medication_id").notEmpty().withMessage("medication_id is required"),
+    validate,
+  ],
+  medsController.triggerRefill,
+);
 
 module.exports.medsRouter = medsRouter;
 

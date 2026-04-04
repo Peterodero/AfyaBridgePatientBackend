@@ -1,4 +1,4 @@
-const { Wallet, Transaction, Order, User } = require('../models');
+const { models:{Wallet, Transaction, Order, User} } = require('../models/index.js');
 const { successResponse, errorResponse } = require('../utils/response');
 const { Op } = require('sequelize');
 const { sequelize } = require('../config/database');

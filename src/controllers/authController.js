@@ -1,4 +1,4 @@
-const { User, OTPVerification, RefreshToken, Wallet } = require('../models');
+const { models:{User, OTPVerification, RefreshToken, Wallet} } = require('../models/index.js');
 const { generateAccessToken, generateRefreshToken, verifyRefreshToken } = require('../utils/jwt');
 const { successResponse, errorResponse } = require('../utils/response');
 const { Op } = require('sequelize');

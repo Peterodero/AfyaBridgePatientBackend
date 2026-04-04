@@ -1,4 +1,4 @@
-const { Message, User, Appointment } = require('../models');
+const { models:{Message, User, Appointment }} = require('../models/index.js');
 const { successResponse, errorResponse } = require('../utils/response');
 const { getIO, isUserOnline } = require('../config/socket');
 const { Op } = require('sequelize');

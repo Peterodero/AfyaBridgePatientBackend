@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { SymptomSession, SymptomMessage } = require('../models');
+const { models:{SymptomSession, SymptomMessage} } = require('../models/index.js');
 const { successResponse, errorResponse } = require('../utils/response');
 
 const SYSTEM_PROMPT = `You are AfyaBridge's medical symptom checker assistant, helping patients in Kenya understand their symptoms and decide on next steps.

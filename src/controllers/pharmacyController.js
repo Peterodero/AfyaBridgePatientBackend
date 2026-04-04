@@ -1,4 +1,4 @@
-const { Pharmacy, Order } = require('../models');
+const { models: {Pharmacy, Order} } = require('../models/index.js');
 const { successResponse, errorResponse } = require('../utils/response');
 const { Op } = require('sequelize');
 

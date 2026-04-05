@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { models: {PatientMedication, Prescription, Order, User }} = require('../models/index.js');
+const { models: {PatientMedication, Prescription, Order, User} } = require('../models/index.js');
 const { successResponse, errorResponse } = require('../utils/response');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -93,12 +93,19 @@ const getMedsDashboard = async (req, res) => {
     // ── Ensure today's slots exist in daily_log for every med ────────────────
     // If a med has no entry for today yet, initialise all its slots as 'pending'
     for (const med of activeMeds) {
-      const log = med.daily_log || {};
+      // TiDB may return JSON columns as strings — always parse defensively
+      const log = typeof med.daily_log === 'string'
+        ? JSON.parse(med.daily_log || '{}')
+        : (med.daily_log || {});
+
       if (!log[todayStr]) {
-        const slots      = getSlotsForMed(med);
-        log[todayStr]    = {};
+        const slots   = getSlotsForMed(med);
+        log[todayStr] = {};
         for (const slot of slots) log[todayStr][slot] = 'pending';
         await med.update({ daily_log: log });
+        med.daily_log = log; // keep in-memory reference in sync
+      } else {
+        med.daily_log = log; // ensure parsed object used below
       }
     }
 
@@ -208,7 +215,7 @@ const getMedsDashboard = async (req, res) => {
 // ─── PATCH /meds/schedule/slot-update ────────────────────────────────────────
 const bulkSlotUpdate = async (req, res) => {
   try {
-    const { slot_id, status, action_timestamp } = req.body;
+    const { slot_id, status } = req.body;
 
     if (!slot_id || !status)
       return errorResponse(res, 'slot_id and status are required', 400, 'MISSING_FIELDS');
@@ -216,20 +223,20 @@ const bulkSlotUpdate = async (req, res) => {
     if (!['taken', 'skipped', 'snoozed', 'pending'].includes(status))
       return errorResponse(res, 'status must be taken, skipped, snoozed, or pending', 400, 'INVALID_STATUS');
 
-    // Parse "morning_20260404" → slotName="Morning", date="2026-04-04"
+    // Parse "morning_20260405" → slotName="Morning", date="2026-04-05"
     const parts = slot_id.match(/^([a-z]+)_(\d{4})(\d{2})(\d{2})$/i);
     if (!parts)
-      return errorResponse(res, 'Invalid slot_id. Expected e.g. morning_20260404', 400, 'INVALID_SLOT_ID');
+      return errorResponse(res, 'Invalid slot_id. Expected e.g. morning_20260405', 400, 'INVALID_SLOT_ID');
 
-    const slotName      = parts[1].charAt(0).toUpperCase() + parts[1].slice(1).toLowerCase();
+    const slotName = parts[1].charAt(0).toUpperCase() + parts[1].slice(1).toLowerCase();
     const scheduledDate = `${parts[2]}-${parts[3]}-${parts[4]}`;
-    const actionTs      = action_timestamp ? new Date(action_timestamp) : new Date();
+    const actionTs = new Date();
 
-    // Find all active meds that belong to this slot
+    // Find all active meds
     const meds = await PatientMedication.findAll({
       where: {
         patient_id: req.user.id,
-        status:     'active',
+        status: 'active',
       },
     });
 
@@ -238,51 +245,100 @@ const bulkSlotUpdate = async (req, res) => {
     if (!medsInSlot.length)
       return errorResponse(res, `No medications found for slot ${slot_id}`, 404, 'SLOT_NOT_FOUND');
 
-    // Update daily_log[date][slot] on each med + decrement stock if taken
-    await Promise.all(medsInSlot.map(async (med) => {
-      const log = med.daily_log || {};
-      if (!log[scheduledDate]) log[scheduledDate] = {};
-      log[scheduledDate][slotName] = status;
-
-      const newAdherence = recalcAdherence(med, log);
-
-      const updates = {
-        daily_log:            log,
-        adherence_percentage: newAdherence,
-      };
-
-      if (status === 'taken') {
-        updates.last_taken_at       = actionTs;
-        updates.quantity_remaining  = Math.max(0, (med.quantity_remaining || 0) - 1);
+    // Update each medication
+    const updateResults = [];
+    for (const med of medsInSlot) {
+      // DEEP CLONE the daily_log to ensure Sequelize detects changes
+      let log;
+      if (typeof med.daily_log === 'string') {
+        log = JSON.parse(med.daily_log || '{}');
+      } else if (med.daily_log && typeof med.daily_log === 'object') {
+        log = JSON.parse(JSON.stringify(med.daily_log)); // Deep clone
+      } else {
+        log = {};
       }
-
+      
+      // Ensure the date exists
+      if (!log[scheduledDate]) {
+        log[scheduledDate] = {};
+      }
+      
+      // Update the slot status
+      log[scheduledDate][slotName] = status;
+      
+      // Prepare updates
+      const updates = {
+        daily_log: log,
+      };
+      
+      // Recalculate adherence
+      const newAdherence = recalcAdherence(med, log);
+      updates.adherence_percentage = newAdherence;
+      
+      // If taken, decrement stock
+      if (status === 'taken') {
+        updates.last_taken_at = actionTs;
+        const newQuantity = Math.max(0, (med.quantity_remaining || 0) - 1);
+        updates.quantity_remaining = newQuantity;
+      }
+      
+      // Save the updates
       await med.update(updates);
-    }));
-
-    // Adherence for today across ALL meds (for the response)
+      
+      // Verify the update was saved correctly
+      const verifyMed = await PatientMedication.findOne({
+        where: { id: med.id },
+        attributes: ['id', 'daily_log', 'quantity_remaining']
+      });
+      
+      let verifyLog;
+      if (typeof verifyMed.daily_log === 'string') {
+        verifyLog = JSON.parse(verifyMed.daily_log);
+      } else {
+        verifyLog = verifyMed.daily_log;
+      }
+      
+      updateResults.push({
+        id: med.id,
+        name: med.drug_name,
+        status: verifyLog?.[scheduledDate]?.[slotName] || 'not found'
+      });
+    }
+    
+    // Recalculate today's adherence for response
     const refreshed = await PatientMedication.findAll({
       where: { patient_id: req.user.id, status: 'active' },
       attributes: ['daily_log'],
     });
-
+    
     let total = 0, taken = 0;
     for (const m of refreshed) {
-      const todaySlots = (m.daily_log || {})[scheduledDate] || {};
+      let log;
+      if (typeof m.daily_log === 'string') {
+        log = JSON.parse(m.daily_log || '{}');
+      } else {
+        log = m.daily_log || {};
+      }
+      
+      const todaySlots = log[scheduledDate] || {};
       for (const s of Object.values(todaySlots)) {
         total++;
         if (s === 'taken') taken++;
       }
     }
     const newAdherencePct = total > 0 ? Math.round((taken / total) * 100) : 0;
-
+    
     return successResponse(res, {
       slot_id,
-      updated_status:           status,
-      medications_updated:      medsInSlot.length,
+      updated_status: status,
+      medications_updated: medsInSlot.length,
+      update_details: updateResults,
       new_adherence_percentage: newAdherencePct,
-      last_updated:             actionTs.toISOString(),
+      last_updated: actionTs.toISOString(),
     }, `All ${slotName.toLowerCase()} medications marked as ${status}`);
+    
   } catch (error) {
+    console.error('Slot update error:', error);
     return errorResponse(res, error.message, 500, 'SLOT_UPDATE_ERROR');
   }
 };

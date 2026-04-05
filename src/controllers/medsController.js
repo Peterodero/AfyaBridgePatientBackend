@@ -1,7 +1,6 @@
 const { Op } = require('sequelize');
-const { models: {PatientMedication, Prescription, User} } = require('../models/index.js');
+const { PatientMedication, Prescription, Order, User } = require('../models');
 const { successResponse, errorResponse } = require('../utils/response');
-const serviceClient = require('../utils/serviceClients');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -352,25 +351,25 @@ const triggerRefill = async (req, res) => {
     if (!med) return errorResponse(res, 'Medication not found or inactive', 404, 'NOT_FOUND');
 
     if (med.prescription_id) {
-      const result = await serviceClient('pharmacy', 'POST', '/orders/create', {
-        patientId:       req.user.id,
-        patientName:     req.user.full_name,
-        patientPhone:    req.user.phone_number,
-        prescriptionIds: [med.prescription_id],
-        pharmacyId:      pharmacy_id || med.pharmacy_id,
-        fulfillmentType: fulfillment_type || 'home_delivery',
-        paymentMethod:   payment_method  || 'mpesa',
-        refill:          true,
-        medicationId:    medication_id,
+      const order = await Order.create({
+        order_number:    `ORD-${Date.now()}`,
+        prescription_id: med.prescription_id,
+        pharmacy_id:     pharmacy_id || med.pharmacy_id,
+        patient_id:      req.user.id,
+        patient_name:    req.user.full_name,
+        patient_phone:   req.user.phone_number,
+        delivery_type:   fulfillment_type || 'home_delivery',
+        payment_method:  payment_method   || 'mpesa',
+        status:          'pending',
+        payment_status:  'unpaid',
       });
-
-      if (!result.success)
-        return errorResponse(res, 'Pharmacy service unavailable. Please try again later.', 503, 'PHARMACY_SERVICE_UNAVAILABLE');
 
       return successResponse(res, {
         medication_id,
         drug_name:    med.drug_name,
-        refill_order: result.data,
+        order_id:     order.id,
+        order_number: order.order_number,
+        status:       order.status,
       }, `Refill for ${med.drug_name} submitted`, 201);
     }
 
@@ -481,19 +480,24 @@ const submitRefill = async (req, res) => {
     if (!prescriptions.length)
       return errorResponse(res, 'No valid prescriptions', 400, 'INVALID_PRESCRIPTIONS');
 
-    const result = await serviceClient('pharmacy', 'POST', '/orders/create', {
-      patientId:       req.user.id,
-      patientName:     req.user.full_name,
-      patientPhone:    req.user.phone_number,
-      prescriptionIds: prescriptions.map(p => p.id),
-      pharmacyId,
-      fulfillmentType,
-      paymentMethod,
-    });
-    if (!result.success)
-      return errorResponse(res, 'Pharmacy service unavailable.', 503, 'PHARMACY_SERVICE_UNAVAILABLE');
+    const orders = await Promise.all(prescriptions.map(p =>
+      Order.create({
+        order_number:    `ORD-${Date.now()}-${p.id.slice(0,4)}`,
+        prescription_id: p.id,
+        pharmacy_id:     pharmacyId,
+        patient_id:      req.user.id,
+        patient_name:    req.user.full_name,
+        patient_phone:   req.user.phone_number,
+        delivery_type:   fulfillmentType || 'home_delivery',
+        payment_method:  paymentMethod   || 'mpesa',
+        status:          'pending',
+        payment_status:  'unpaid',
+      })
+    ));
 
-    return successResponse(res, result.data, 'Refill request submitted', 201);
+    return successResponse(res, {
+      orders: orders.map(o => ({ order_id: o.id, order_number: o.order_number, status: o.status })),
+    }, 'Refill request submitted', 201);
   } catch (error) {
     return errorResponse(res, error.message, 500, 'SUBMIT_REFILL_ERROR');
   }

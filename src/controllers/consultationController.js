@@ -1,9 +1,9 @@
-const { models: {Appointment} } = require('../models/index.js');
+const { Consultation, Appointment, Message } = require('../models');
 const { successResponse, errorResponse } = require('../utils/response');
-const serviceClient = require('../utils/serviceClients');
 
 // POST /consultations/:appointmentId/start
-// Delegates to doctor backend — doctor backend creates Consultation record
+// Patient presses "Start Consultation" — fetches the meeting URL
+// already saved by the doctor backend into Consultation / Appointment.
 const startConsultation = async (req, res) => {
   try {
     const { appointmentId } = req.params;
@@ -13,50 +13,74 @@ const startConsultation = async (req, res) => {
     });
     if (!appointment) return errorResponse(res, 'Appointment not found', 404, 'NOT_FOUND');
 
-    const result = await serviceClient('doctor', 'POST', `/consultations/${appointmentId}/start`, {
-      patientId: req.user.id,
+    if (appointment.status !== 'confirmed')
+      return errorResponse(res, 'Appointment is not confirmed yet', 400, 'APPOINTMENT_NOT_CONFIRMED');
+
+    const consultation = await Consultation.findOne({
+      where: { appointment_id: appointmentId },
     });
 
-    if (!result.success) {
-      return errorResponse(res, 'Consultation service is currently unavailable.', 503, 'CONSULTATION_SERVICE_UNAVAILABLE');
+    // Doctor has not started the consultation yet — no link available
+    if (!consultation || !consultation.meeting_url) {
+      return errorResponse(
+        res,
+        'The doctor has not started the consultation yet. Please wait.',
+        404,
+        'CONSULTATION_NOT_STARTED'
+      );
     }
 
-    return successResponse(res, result.data);
+    return successResponse(res, {
+      consultationId: consultation.id,
+      status:         consultation.status,
+      meetingUrl:     consultation.meeting_url,
+      startTime:      consultation.start_time,
+    });
   } catch (error) {
     return errorResponse(res, error.message, 500, 'START_CONSULTATION_ERROR');
   }
 };
 
 // POST /consultations/:appointmentId/chat
-// Delegates to doctor backend — doctor backend owns ConsultationMessage records
 const sendConsultationMessage = async (req, res) => {
   try {
     const { appointmentId } = req.params;
-    const { message } = req.body;
+    const { message }       = req.body;
+
+    if (!message) return errorResponse(res, 'Message is required', 400, 'MISSING_FIELD');
 
     const appointment = await Appointment.findOne({
       where: { id: appointmentId, patient_id: req.user.id },
     });
     if (!appointment) return errorResponse(res, 'Appointment not found', 404, 'NOT_FOUND');
 
-    const result = await serviceClient('doctor', 'POST', `/consultations/${appointmentId}/chat`, {
-      patientId: req.user.id,
-      message,
-      sender: 'patient',
+    const consultation = await Consultation.findOne({
+      where: { appointment_id: appointmentId, status: 'active' },
+    });
+    if (!consultation)
+      return errorResponse(res, 'No active consultation for this appointment', 404, 'NO_ACTIVE_CONSULTATION');
+
+    const msg = await Message.create({
+      sender_id:       req.user.id,
+      receiver_id:     appointment.doctor_id,
+      consultation_id: consultation.id,
+      content:         message,
+      type:            'text',
+      is_read:         false,
     });
 
-    if (!result.success) {
-      return errorResponse(res, 'Consultation service is currently unavailable.', 503, 'CONSULTATION_SERVICE_UNAVAILABLE');
-    }
-
-    return successResponse(res, result.data);
+    return successResponse(res, {
+      messageId:      msg.id,
+      consultationId: consultation.id,
+      content:        msg.content,
+      sentAt:         msg.created_at,
+    }, 'Message sent', 201);
   } catch (error) {
     return errorResponse(res, error.message, 500, 'CONSULTATION_CHAT_ERROR');
   }
 };
 
 // POST /consultations/:appointmentId/end
-// Delegates to doctor backend
 const endConsultation = async (req, res) => {
   try {
     const { appointmentId } = req.params;
@@ -66,15 +90,20 @@ const endConsultation = async (req, res) => {
     });
     if (!appointment) return errorResponse(res, 'Appointment not found', 404, 'NOT_FOUND');
 
-    const result = await serviceClient('doctor', 'POST', `/consultations/${appointmentId}/end`, {
-      patientId: req.user.id,
+    const consultation = await Consultation.findOne({
+      where: { appointment_id: appointmentId, status: 'active' },
     });
+    if (!consultation)
+      return errorResponse(res, 'No active consultation found', 404, 'NO_ACTIVE_CONSULTATION');
 
-    if (!result.success) {
-      return errorResponse(res, 'Consultation service is currently unavailable.', 503, 'CONSULTATION_SERVICE_UNAVAILABLE');
-    }
+    await consultation.update({ status: 'completed', end_time: new Date() });
+    await appointment.update({ status: 'completed' });
 
-    return successResponse(res, result.data, 'Consultation ended');
+    return successResponse(res, {
+      consultationId: consultation.id,
+      status:         'completed',
+      endTime:        consultation.end_time,
+    }, 'Consultation ended');
   } catch (error) {
     return errorResponse(res, error.message, 500, 'END_CONSULTATION_ERROR');
   }

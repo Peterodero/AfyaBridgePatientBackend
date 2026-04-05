@@ -2,7 +2,6 @@ const { models:{Wallet, Transaction, Order, User} } = require('../models/index.j
 const { successResponse, errorResponse } = require('../utils/response');
 const { Op } = require('sequelize');
 const { sequelize } = require('../config/database');
-const serviceClient = require('../utils/serviceClients');
 
 // ─── Internal helper: get or create wallet for a patient 
 const getOrCreateWallet = async (userId) => {

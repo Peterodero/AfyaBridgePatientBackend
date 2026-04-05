@@ -1,6 +1,5 @@
-const { models: {User, AppointmentSlot, Appointment, Wallet, Transaction} } = require('../models/index.js');
+const { User, AppointmentSlot, Appointment, Wallet, Transaction } = require('../models');
 const { successResponse, errorResponse } = require('../utils/response');
-const serviceClient = require('../utils/serviceClients');
 const { sequelize } = require('../config/database');
 const { Op } = require('sequelize');
 
@@ -314,17 +313,6 @@ const bookAppointment = async (req, res) => {
 
     await t.commit();
 
-    // 7. Notify doctor backend (fire-and-forget — booking succeeds even if doctor backend is down)
-    serviceClient('doctor', 'POST', '/appointments/notify', {
-      appointmentId: appointment.id,
-      patientId: req.user.id,
-      doctorId,
-      date,
-      time: normalizedTime,
-      type: appointment.type,
-      reason,
-    }).catch(() => {});
-
     return successResponse(res, {
       appointmentId: appointment.id,
       doctor: {
@@ -408,7 +396,6 @@ const getAppointmentById = async (req, res) => {
     const appointment = await Appointment.findOne({
       where: { id: req.params.appointmentId, patient_id: req.user.id },
     });
-    console.log(req.user.id)
     if (!appointment) return errorResponse(res, 'Appointment not found', 404, 'NOT_FOUND');
 
     const doctor = await User.findByPk(appointment.doctor_id, {

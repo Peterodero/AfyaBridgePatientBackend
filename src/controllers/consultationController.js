@@ -1,4 +1,4 @@
-const { Consultation, Appointment, Message } = require('../models');
+const { models: {Consultation, Appointment, Message} } = require('../models/index.js');
 const { successResponse, errorResponse } = require('../utils/response');
 
 // POST /consultations/:appointmentId/start

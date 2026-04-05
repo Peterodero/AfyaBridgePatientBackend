@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { PatientMedication, Prescription, Order, User } = require('../models');
+const { models: {PatientMedication, Prescription, Order, User }} = require('../models/index.js');
 const { successResponse, errorResponse } = require('../utils/response');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

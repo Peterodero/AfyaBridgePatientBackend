@@ -128,24 +128,6 @@ const initiatePayment = async (req, res) => {
       }, 'Payment successful');
     }
 
-    // // ── M-Pesa payment (fallback) ────────────────────────────────
-    // if (paymentMethod === 'mpesa') {
-    //   await t.rollback(); // No DB writes yet — pharmacy backend handles this
-
-    //   const result = await serviceClient('pharmacy', 'POST', '/payments/initiate', {
-    //     orderId,
-    //     patientId: req.user.id,
-    //     paymentMethod: 'mpesa',
-    //     phoneNumber: phoneNumber || req.user.phone_number,
-    //     amount: order.total_amount,
-    //   });
-
-    //   if (!result.success)
-    //     return errorResponse(res, 'Payment service is currently unavailable. Please try again later.', 503, 'PAYMENT_SERVICE_UNAVAILABLE');
-
-    //   return successResponse(res, result.data);
-    // }
-
     await t.rollback();
     return errorResponse(res, 'Invalid payment method. Use wallet or mpesa.', 400, 'INVALID_PAYMENT_METHOD');
   } catch (error) {

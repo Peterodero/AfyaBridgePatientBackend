@@ -86,7 +86,6 @@ const getProfileSummary = async (req, res) => {
         bloodType: user.blood_type,
         age,
       },
-      // allergies, conditions are JSON columns on the user
       allergies: user.allergies || [],
       ongoingConditions: (user.conditions || []).map((c) => ({
         name: c.name,
@@ -208,17 +207,42 @@ const getClinicalProfile = async (req, res) => {
   }
 };
 
+// ──────────────────────────────────────────────────────────────────────────────
+// FIXED: ALLERGY FUNCTIONS - Using new array references to trigger Sequelize
+// ──────────────────────────────────────────────────────────────────────────────
+
 // POST /patient/records/allergies
-// allergies is a JSON column on users — we push to the array
 const addAllergy = async (req, res) => {
   try {
     const { allergen, reaction, severity, diagnosedDate } = req.body;
-    const allergies = req.user.allergies || [];
-    const newAllergy = { id: `ALG-${Date.now()}`, allergen, reaction, severity, diagnosedDate };
-    allergies.push(newAllergy);
-    await req.user.update({ allergies });
-    return successResponse(res, { id: newAllergy.id, allergen, reaction }, 'Allergy added successfully', 201);
+    
+    // Get current allergies (array)
+    const currentAllergies = req.user.allergies || [];
+    
+    // Create new allergy object
+    const newAllergy = { 
+      id: `ALG-${Date.now()}`, 
+      allergen, 
+      reaction, 
+      severity, 
+      diagnosedDate: diagnosedDate || new Date().toISOString().split('T')[0]
+    };
+    
+    // Create a NEW array (this triggers Sequelize change detection)
+    const updatedAllergies = [...currentAllergies, newAllergy];
+    
+    // Update with the new array
+    await req.user.update({ allergies: updatedAllergies });
+    
+    console.log('Allergy added successfully:', newAllergy);
+    
+    return successResponse(res, 
+      { id: newAllergy.id, allergen, reaction, severity }, 
+      'Allergy added successfully', 
+      201
+    );
   } catch (error) {
+    console.error('Add allergy error:', error);
     return errorResponse(res, error.message, 500, 'ADD_ALLERGY_ERROR');
   }
 };
@@ -226,7 +250,9 @@ const addAllergy = async (req, res) => {
 // GET /patient/records/allergies
 const getAllergies = async (req, res) => {
   try {
-    return successResponse(res, { allergies: req.user.allergies || [] });
+    const allergies = req.user.allergies || [];
+    console.log('Retrieved allergies:', allergies.length);
+    return successResponse(res, { allergies });
   } catch (error) {
     return errorResponse(res, error.message, 500, 'GET_ALLERGIES_ERROR');
   }
@@ -235,13 +261,32 @@ const getAllergies = async (req, res) => {
 // PUT /patient/records/allergies/:id
 const updateAllergy = async (req, res) => {
   try {
-    const allergies = req.user.allergies || [];
-    const idx = allergies.findIndex((a) => a.id === req.params.id);
-    if (idx === -1) return errorResponse(res, 'Allergy not found', 404, 'NOT_FOUND');
-
-    allergies[idx] = { ...allergies[idx], ...req.body };
-    await req.user.update({ allergies });
-    return successResponse(res, { allergy: allergies[idx] }, 'Allergy updated successfully');
+    const { id } = req.params;
+    const { allergen, reaction, severity, diagnosedDate } = req.body;
+    
+    const currentAllergies = req.user.allergies || [];
+    const allergyIndex = currentAllergies.findIndex(a => a.id === id);
+    
+    if (allergyIndex === -1) {
+      return errorResponse(res, 'Allergy not found', 404, 'NOT_FOUND');
+    }
+    
+    // Create a NEW array with the updated allergy
+    const updatedAllergies = [...currentAllergies];
+    updatedAllergies[allergyIndex] = {
+      ...updatedAllergies[allergyIndex],
+      allergen: allergen || updatedAllergies[allergyIndex].allergen,
+      reaction: reaction || updatedAllergies[allergyIndex].reaction,
+      severity: severity || updatedAllergies[allergyIndex].severity,
+      diagnosedDate: diagnosedDate || updatedAllergies[allergyIndex].diagnosedDate
+    };
+    
+    await req.user.update({ allergies: updatedAllergies });
+    
+    return successResponse(res, 
+      { allergy: updatedAllergies[allergyIndex] }, 
+      'Allergy updated successfully'
+    );
   } catch (error) {
     return errorResponse(res, error.message, 500, 'UPDATE_ALLERGY_ERROR');
   }
@@ -250,13 +295,26 @@ const updateAllergy = async (req, res) => {
 // DELETE /patient/records/allergies/:id
 const deleteAllergy = async (req, res) => {
   try {
-    const allergies = (req.user.allergies || []).filter((a) => a.id !== req.params.id);
-    await req.user.update({ allergies });
+    const { id } = req.params;
+    
+    const currentAllergies = req.user.allergies || [];
+    const updatedAllergies = currentAllergies.filter(a => a.id !== id);
+    
+    if (updatedAllergies.length === currentAllergies.length) {
+      return errorResponse(res, 'Allergy not found', 404, 'NOT_FOUND');
+    }
+    
+    await req.user.update({ allergies: updatedAllergies });
+    
     return successResponse(res, null, 'Allergy deleted successfully');
   } catch (error) {
     return errorResponse(res, error.message, 500, 'DELETE_ALLERGY_ERROR');
   }
 };
+
+// ──────────────────────────────────────────────────────────────────────────────
+// END OF FIXED ALLERGY FUNCTIONS
+// ──────────────────────────────────────────────────────────────────────────────
 
 // GET /patient/records/conditions
 const getConditions = async (req, res) => {
@@ -271,10 +329,10 @@ const getConditions = async (req, res) => {
 const addCondition = async (req, res) => {
   try {
     const { condition, since, status } = req.body;
-    const conditions = req.user.conditions || [];
+    const currentConditions = req.user.conditions || [];
     const newCondition = { id: `CON-${Date.now()}`, name: condition, diagnosedDate: since, status };
-    conditions.push(newCondition);
-    await req.user.update({ conditions });
+    const updatedConditions = [...currentConditions, newCondition];
+    await req.user.update({ conditions: updatedConditions });
     return successResponse(res, { condition: newCondition }, 'Condition added successfully', 201);
   } catch (error) {
     return errorResponse(res, error.message, 500, 'ADD_CONDITION_ERROR');
@@ -289,9 +347,15 @@ const updateCondition = async (req, res) => {
     if (idx === -1) return errorResponse(res, 'Condition not found', 404, 'NOT_FOUND');
 
     const { condition, since, status } = req.body;
-    conditions[idx] = { ...conditions[idx], name: condition || conditions[idx].name, diagnosedDate: since || conditions[idx].diagnosedDate, status: status || conditions[idx].status };
-    await req.user.update({ conditions });
-    return successResponse(res, { condition: conditions[idx] }, 'Condition updated successfully');
+    const updatedConditions = [...conditions];
+    updatedConditions[idx] = { 
+      ...updatedConditions[idx], 
+      name: condition || updatedConditions[idx].name, 
+      diagnosedDate: since || updatedConditions[idx].diagnosedDate, 
+      status: status || updatedConditions[idx].status 
+    };
+    await req.user.update({ conditions: updatedConditions });
+    return successResponse(res, { condition: updatedConditions[idx] }, 'Condition updated successfully');
   } catch (error) {
     return errorResponse(res, error.message, 500, 'UPDATE_CONDITION_ERROR');
   }
@@ -437,14 +501,14 @@ const getEmergencyContact = async (req, res) => {
 const addEmergencyContact = async (req, res) => {
   try {
     const { name, relationship, phone } = req.body;
-    const contacts = req.user.emergency_contacts || [];
+    const currentContacts = req.user.emergency_contacts || [];
 
-    if (contacts.length > 0)
+    if (currentContacts.length > 0)
       return errorResponse(res, 'Emergency contact already exists. Use update instead.', 409, 'ALREADY_EXISTS');
 
     const contact = { id: `EC-${Date.now()}`, name, relationship, phone };
-    contacts.push(contact);
-    await req.user.update({ emergency_contacts: contacts });
+    const updatedContacts = [...currentContacts, contact];
+    await req.user.update({ emergency_contacts: updatedContacts });
     return successResponse(res, { contact }, 'Emergency contact added successfully', 201);
   } catch (error) {
     return errorResponse(res, error.message, 500, 'ADD_EMERGENCY_CONTACT_ERROR');
@@ -460,9 +524,10 @@ const updateEmergencyContact = async (req, res) => {
     if (contacts.length === 0)
       return errorResponse(res, 'Emergency contact not found. Add one first.', 404, 'NOT_FOUND');
 
-    contacts[0] = { ...contacts[0], name, relationship, phone };
-    await req.user.update({ emergency_contacts: contacts });
-    return successResponse(res, { contact: contacts[0] }, 'Emergency contact updated successfully');
+    const updatedContacts = [...contacts];
+    updatedContacts[0] = { ...updatedContacts[0], name, relationship, phone };
+    await req.user.update({ emergency_contacts: updatedContacts });
+    return successResponse(res, { contact: updatedContacts[0] }, 'Emergency contact updated successfully');
   } catch (error) {
     return errorResponse(res, error.message, 500, 'UPDATE_EMERGENCY_CONTACT_ERROR');
   }
@@ -511,7 +576,6 @@ const updateDataSharing = async (req, res) => {
 };
 
 // POST /patient/security/request-data
-// DataExportRequest table removed in new schema — use a notification instead
 const requestDataExport = async (req, res) => {
   try {
     await Notification.create({

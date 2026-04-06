@@ -894,6 +894,59 @@ const searchMedicines = async (req, res) => {
   }
 };
 
+// ─── GET /meds/prescriptions ──────────────────────────────────────────────
+// Returns ALL prescriptions for the patient (new + old + refillable)
+const getMyPrescriptions = async (req, res) => {
+  try {
+    const prescriptions = await Prescription.findAll({
+      where: {
+        patient_id: req.user.id,
+      },
+      include: [
+        {
+          model: User,
+          as: "doctor",
+          attributes: ["id", "full_name", "specialty"],
+        },
+      ],
+      order: [["created_at", "DESC"]],
+    });
+
+    const formattedPrescriptions = prescriptions.map((p) => ({
+      id: p.id,
+      prescription_number: p.prescription_number,
+      issue_date: p.issue_date,
+      expiry_date: p.expiry_date,
+      diagnosis: p.diagnosis,
+      doctor_name: p.doctor?.full_name,
+      doctor_specialization: p.doctor?.specialty,
+      status: p.status,  // draft, pending, validated, rejected, dispensed, delivered
+      items: (p.items || []).map((item) => ({
+        drug_name: item.drug_name,
+        dosage: item.dosage,
+        dosage_form: item.dosage_form,
+        quantity: item.quantity,
+        instructions: item.instructions,
+      })),
+      is_refillable: ["dispensed", "delivered"].includes(p.status) && 
+                     (p.items || []).some(item => (item.quantity || 0) > 0),
+    }));
+
+    return successResponse(res, {
+      prescriptions: formattedPrescriptions,
+      summary: {
+        total: formattedPrescriptions.length,
+        new: formattedPrescriptions.filter(p => p.status === 'pending').length,
+        dispensed: formattedPrescriptions.filter(p => p.status === 'dispensed').length,
+        expired: formattedPrescriptions.filter(p => p.expiry_date < getTodayLocal()).length,
+      },
+    });
+  } catch (error) {
+    console.error("Get prescriptions error:", error);
+    return errorResponse(res, error.message, 500, "GET_PRESCRIPTIONS_ERROR");
+  }
+};
+
 // ─── GET /meds/prescriptions/refillable ──────────────────────────────────────
 const getRefillablePrescriptions = async (req, res) => {
   try {
@@ -1185,6 +1238,7 @@ module.exports = {
   getInventory,
   triggerRefill,
   bulkRefill,
+  getMyPrescriptions,
   getRefillableMeds,
   selectMedication,
   submitRefill,

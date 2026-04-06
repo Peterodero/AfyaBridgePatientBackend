@@ -287,6 +287,9 @@ medsRouter.post(
 
 // ─── NEW: Prescription to Order Routes ─────────────────────────────────────────
 
+// In patientRoutes.js or medsRouter
+medsRouter.get("/prescriptions", authenticate, medsController.getMyPrescriptions);
+
 // Get refillable prescriptions (active, not expired, with remaining quantity)
 medsRouter.get(
   "/prescriptions/refillable",

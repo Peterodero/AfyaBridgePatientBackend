@@ -11,6 +11,8 @@ const SLOT_CONFIG = {
   Bedtime:   { time: '09:00 PM', order: 3 },
 };
 
+const ALL_SLOTS = ['Morning', 'Afternoon', 'Evening', 'Bedtime'];
+
 function timeToSlot(timeStr) {
   if (!timeStr) return 'Morning';
   const [h] = timeStr.split(':').map(Number);
@@ -41,26 +43,28 @@ function currentSlot() {
   return 'Bedtime';
 }
 
-// Returns the slots a medication belongs to based on dosage_timing
-// e.g. ["08:00","13:00"] → ["Morning","Afternoon"]
 function getSlotsForMed(med) {
   if (med.dosage_timing && med.dosage_timing.length) {
     return [...new Set(med.dosage_timing.map(timeToSlot))];
   }
-  // No timings — distribute by doses per day
   const count = dosesPerDay(med);
-  const all   = ['Morning', 'Afternoon', 'Evening', 'Bedtime'];
-  return all.slice(0, count);
+  return ALL_SLOTS.slice(0, count);
 }
 
-// Recalculate adherence_percentage from daily_log across all days since start_date
+// Recalculate adherence_percentage from daily_log across all days
 function recalcAdherence(med, updatedLog) {
   const log = updatedLog || med.daily_log || {};
-  const dates = Object.keys(log);
+  const today = new Date().toISOString().split('T')[0];
+  const startDate = med.start_date;
+  
+  const dates = Object.keys(log).filter(date => {
+    return date >= startDate && date <= today;
+  });
+  
   if (!dates.length) return 0;
 
   let totalExpected = 0;
-  let totalTaken    = 0;
+  let totalTaken = 0;
 
   for (const date of dates) {
     const daySlots = log[date];
@@ -90,27 +94,74 @@ const getMedsDashboard = async (req, res) => {
       },
     });
 
-    // ── Ensure today's slots exist in daily_log for every med ────────────────
-    // If a med has no entry for today yet, initialise all its slots as 'pending'
+    // ── Ensure today's slots exist and NORMALIZE any mixed statuses ─────────
     for (const med of activeMeds) {
-      // TiDB may return JSON columns as strings — always parse defensively
       const log = typeof med.daily_log === 'string'
         ? JSON.parse(med.daily_log || '{}')
         : (med.daily_log || {});
 
       if (!log[todayStr]) {
-        const slots   = getSlotsForMed(med);
+        const slots = getSlotsForMed(med);
         log[todayStr] = {};
         for (const slot of slots) log[todayStr][slot] = 'pending';
         await med.update({ daily_log: log });
-        med.daily_log = log; // keep in-memory reference in sync
+        med.daily_log = log;
       } else {
-        med.daily_log = log; // ensure parsed object used below
+        med.daily_log = log;
+      }
+    }
+
+    // ── NORMALIZE: Ensure all medications in same slot have same status ─────
+    const slotNormalization = {};
+    
+    for (const med of activeMeds) {
+      const log = med.daily_log || {};
+      const slots = getSlotsForMed(med);
+      
+      for (const slotName of slots) {
+        const status = log[todayStr]?.[slotName] || 'pending';
+        const key = `${todayStr}_${slotName}`;
+        
+        if (!slotNormalization[key]) {
+          slotNormalization[key] = {};
+        }
+        
+        if (status === 'taken') slotNormalization[key].hasTaken = true;
+        if (status === 'skipped') slotNormalization[key].hasSkipped = true;
+        slotNormalization[key][med.id] = status;
+      }
+    }
+    
+    for (const med of activeMeds) {
+      const log = med.daily_log || {};
+      let needsUpdate = false;
+      
+      const slots = getSlotsForMed(med);
+      for (const slotName of slots) {
+        const key = `${todayStr}_${slotName}`;
+        const slotData = slotNormalization[key];
+        
+        if (slotData) {
+          let newStatus = 'pending';
+          if (slotData.hasTaken) newStatus = 'taken';
+          else if (slotData.hasSkipped) newStatus = 'skipped';
+          
+          const currentStatus = log[todayStr]?.[slotName] || 'pending';
+          if (currentStatus !== newStatus) {
+            if (!log[todayStr]) log[todayStr] = {};
+            log[todayStr][slotName] = newStatus;
+            needsUpdate = true;
+          }
+        }
+      }
+      
+      if (needsUpdate) {
+        await med.update({ daily_log: log });
+        med.daily_log = log;
       }
     }
 
     // ── Build slot map from daily_log ────────────────────────────────────────
-    // slotMap: { Morning: { meds: [...], allTaken: bool }, ... }
     const slotMap = {};
 
     for (const med of activeMeds) {
@@ -119,22 +170,79 @@ const getMedsDashboard = async (req, res) => {
       const slots    = getSlotsForMed(med);
 
       for (const slotName of slots) {
-        if (!slotMap[slotName]) slotMap[slotName] = { meds: [], allTaken: true };
+        if (!slotMap[slotName]) {
+          slotMap[slotName] = { meds: [], allTaken: true, anySkipped: false };
+        }
         const doseStatus = todayLog[slotName] || 'pending';
         slotMap[slotName].meds.push({ med, doseStatus });
         if (doseStatus !== 'taken') slotMap[slotName].allTaken = false;
+        if (doseStatus === 'skipped') slotMap[slotName].anySkipped = true;
       }
     }
 
-    // ── Adherence — sum across all meds for today ────────────────────────────
+    // ── Adherence Calculation: BOTH Option A AND Option B ────────────────────
+    
+    // Option A: Per-dose adherence (individual pill counting)
     let totalDoses = 0, takenDoses = 0;
-    for (const { meds } of Object.values(slotMap)) {
-      for (const { doseStatus } of meds) {
-        totalDoses++;
-        if (doseStatus === 'taken') takenDoses++;
+    
+    for (const med of activeMeds) {
+      const log = med.daily_log || {};
+      const startDate = med.start_date;
+      
+      for (const [date, slots] of Object.entries(log)) {
+        if (date >= startDate && date <= todayStr) {
+          for (const slotStatus of Object.values(slots)) {
+            totalDoses++;
+            if (slotStatus === 'taken') takenDoses++;
+          }
+        }
       }
     }
-    const adherencePct = totalDoses > 0 ? Math.round((takenDoses / totalDoses) * 100) : 0;
+    
+    const doseAdherencePct = totalDoses > 0 ? Math.round((takenDoses / totalDoses) * 100) : 0;
+    
+    // Option B: Per-slot adherence (ALL or NOTHING approach)
+    // A slot is considered "completed" only if ALL medications in that slot are taken
+    const slotCompletion = {};
+    
+    for (const med of activeMeds) {
+      const log = med.daily_log || {};
+      const startDate = med.start_date;
+      const slotsForMed = getSlotsForMed(med);
+      
+      for (const [date, daySlots] of Object.entries(log)) {
+        if (date >= startDate && date <= todayStr) {
+          for (const slotName of slotsForMed) {
+            const key = `${date}_${slotName}`;
+            if (!slotCompletion[key]) {
+              slotCompletion[key] = {
+                date,
+                slotName,
+                totalMeds: 0,
+                takenMeds: 0
+              };
+            }
+            
+            slotCompletion[key].totalMeds++;
+            if (daySlots[slotName] === 'taken') {
+              slotCompletion[key].takenMeds++;
+            }
+          }
+        }
+      }
+    }
+    
+    let totalSlots = 0;
+    let completedSlots = 0;
+    
+    for (const slot of Object.values(slotCompletion)) {
+      totalSlots++;
+      if (slot.takenMeds === slot.totalMeds) {
+        completedSlots++;
+      }
+    }
+    
+    const slotAdherencePct = totalSlots > 0 ? Math.round((completedSlots / totalSlots) * 100) : 0;
 
     // ── Build time_slots array ───────────────────────────────────────────────
     const nowSlot  = currentSlot();
@@ -146,13 +254,13 @@ const getMedsDashboard = async (req, res) => {
         const slotId = `${slotName.toLowerCase()}_${todayStr.replace(/-/g, '')}`;
 
         let slotStatus = 'upcoming';
+        
         if (entry.allTaken) {
           slotStatus = 'taken';
         } else if (slotName === nowSlot) {
           slotStatus = 'now';
         } else if (SLOT_CONFIG[slotName].order < SLOT_CONFIG[nowSlot].order) {
-          const anySkipped = entry.meds.some(m => m.doseStatus === 'skipped');
-          slotStatus = anySkipped ? 'skipped' : 'pending';
+          slotStatus = entry.anySkipped ? 'skipped' : 'upcoming';
         }
 
         return {
@@ -200,9 +308,18 @@ const getMedsDashboard = async (req, res) => {
         days_total_duration_to_take_medication: daysTotalDuration,
       },
       adherence_summary: {
-        percentage:  adherencePct,
-        doses_taken: takenDoses,
-        total_doses: totalDoses,
+        // Option A: Per-dose adherence (pill counting)
+        dose_adherence: {
+          percentage: doseAdherencePct,
+          doses_taken: takenDoses,
+          total_doses: totalDoses,
+        },
+        // Option B: Per-slot adherence (ALL or NOTHING)
+        slot_adherence: {
+          percentage: slotAdherencePct,
+          slots_completed: completedSlots,
+          total_slots: totalSlots,
+        }
       },
       alerts,
       time_slots: timeSlots,
@@ -223,7 +340,6 @@ const bulkSlotUpdate = async (req, res) => {
     if (!['taken', 'skipped', 'snoozed', 'pending'].includes(status))
       return errorResponse(res, 'status must be taken, skipped, snoozed, or pending', 400, 'INVALID_STATUS');
 
-    // Parse "morning_20260405" → slotName="Morning", date="2026-04-05"
     const parts = slot_id.match(/^([a-z]+)_(\d{4})(\d{2})(\d{2})$/i);
     if (!parts)
       return errorResponse(res, 'Invalid slot_id. Expected e.g. morning_20260405', 400, 'INVALID_SLOT_ID');
@@ -232,7 +348,6 @@ const bulkSlotUpdate = async (req, res) => {
     const scheduledDate = `${parts[2]}-${parts[3]}-${parts[4]}`;
     const actionTs = new Date();
 
-    // Find all active meds
     const meds = await PatientMedication.findAll({
       where: {
         patient_id: req.user.id,
@@ -245,95 +360,50 @@ const bulkSlotUpdate = async (req, res) => {
     if (!medsInSlot.length)
       return errorResponse(res, `No medications found for slot ${slot_id}`, 404, 'SLOT_NOT_FOUND');
 
-    // Update each medication
     const updateResults = [];
     for (const med of medsInSlot) {
-      // DEEP CLONE the daily_log to ensure Sequelize detects changes
       let log;
       if (typeof med.daily_log === 'string') {
         log = JSON.parse(med.daily_log || '{}');
       } else if (med.daily_log && typeof med.daily_log === 'object') {
-        log = JSON.parse(JSON.stringify(med.daily_log)); // Deep clone
+        log = JSON.parse(JSON.stringify(med.daily_log));
       } else {
         log = {};
       }
       
-      // Ensure the date exists
       if (!log[scheduledDate]) {
         log[scheduledDate] = {};
       }
       
-      // Update the slot status
       log[scheduledDate][slotName] = status;
       
-      // Prepare updates
       const updates = {
         daily_log: log,
       };
       
-      // Recalculate adherence
       const newAdherence = recalcAdherence(med, log);
       updates.adherence_percentage = newAdherence;
       
-      // If taken, decrement stock
       if (status === 'taken') {
         updates.last_taken_at = actionTs;
         const newQuantity = Math.max(0, (med.quantity_remaining || 0) - 1);
         updates.quantity_remaining = newQuantity;
       }
       
-      // Save the updates
       await med.update(updates);
-      
-      // Verify the update was saved correctly
-      const verifyMed = await PatientMedication.findOne({
-        where: { id: med.id },
-        attributes: ['id', 'daily_log', 'quantity_remaining']
-      });
-      
-      let verifyLog;
-      if (typeof verifyMed.daily_log === 'string') {
-        verifyLog = JSON.parse(verifyMed.daily_log);
-      } else {
-        verifyLog = verifyMed.daily_log;
-      }
       
       updateResults.push({
         id: med.id,
         name: med.drug_name,
-        status: verifyLog?.[scheduledDate]?.[slotName] || 'not found'
+        status: status
       });
     }
-    
-    // Recalculate today's adherence for response
-    const refreshed = await PatientMedication.findAll({
-      where: { patient_id: req.user.id, status: 'active' },
-      attributes: ['daily_log'],
-    });
-    
-    let total = 0, taken = 0;
-    for (const m of refreshed) {
-      let log;
-      if (typeof m.daily_log === 'string') {
-        log = JSON.parse(m.daily_log || '{}');
-      } else {
-        log = m.daily_log || {};
-      }
-      
-      const todaySlots = log[scheduledDate] || {};
-      for (const s of Object.values(todaySlots)) {
-        total++;
-        if (s === 'taken') taken++;
-      }
-    }
-    const newAdherencePct = total > 0 ? Math.round((taken / total) * 100) : 0;
     
     return successResponse(res, {
       slot_id,
       updated_status: status,
       medications_updated: medsInSlot.length,
       update_details: updateResults,
-      new_adherence_percentage: newAdherencePct,
       last_updated: actionTs.toISOString(),
     }, `All ${slotName.toLowerCase()} medications marked as ${status}`);
     
@@ -429,7 +499,6 @@ const triggerRefill = async (req, res) => {
       }, `Refill for ${med.drug_name} submitted`, 201);
     }
 
-    // OTC — no prescription linked
     return successResponse(res, {
       medication_id,
       drug_name: med.drug_name,

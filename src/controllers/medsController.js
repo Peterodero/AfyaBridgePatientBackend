@@ -2,7 +2,7 @@ const { Op } = require('sequelize');
 const { models: {PatientMedication, Prescription, Order, User} } = require('../models/index.js');
 const { successResponse, errorResponse } = require('../utils/response');
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Helper ──────────────────────────────────────────────────────────────────
 
 const SLOT_CONFIG = {
   Morning:   { time: '08:00 AM', order: 0 },

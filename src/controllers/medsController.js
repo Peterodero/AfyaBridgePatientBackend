@@ -1,3 +1,4 @@
+const { sequelize } = require('../config/database');
 const { Op } = require("sequelize");
 const {
   models: { PatientMedication, Prescription, Order, User },
@@ -37,25 +38,6 @@ function dosesPerDay(med) {
   if (f.includes("every 12")) return 2;
   return 1;
 }
-
-// function currentSlot() {
-//   // Use LOCAL time for slot calculation since slot times are in local time
-//   const now = new Date();
-//   const h = now.getHours(); // Use local hours, not UTC
-
-//   if (h >= 5 && h < 12) return 'Morning';
-//   if (h >= 12 && h < 17) return 'Afternoon';
-//   if (h >= 17 && h < 21) return 'Evening';
-//   return 'Bedtime';
-// }
-
-// function getTodayLocal() {
-//   const now = new Date();
-//   const year = now.getFullYear();
-//   const month = String(now.getMonth() + 1).padStart(2, '0');
-//   const day = String(now.getDate()).padStart(2, '0');
-//   return `${year}-${month}-${day}`;
-// }
 
 const EAT_OFFSET_MS = 3 * 60 * 60 * 1000;
 
@@ -519,6 +501,9 @@ const getInventory = async (req, res) => {
         "next_refill_date",
         "is_chronic",
         "prescription_id",
+        "refills_allowed",
+        "refills_used",
+        "quantity_dispensed",
       ],
     });
 
@@ -539,6 +524,7 @@ const getInventory = async (req, res) => {
         next_refill_date: med.next_refill_date,
         is_chronic: med.is_chronic,
         prescription_id: med.prescription_id,
+        refills_remaining: med.refills_allowed ? med.refills_allowed - (med.refills_used || 0) : null,
         unit: "pills",
       };
     });
@@ -558,35 +544,25 @@ const getInventory = async (req, res) => {
   }
 };
 
-//     Purpose: Refill a single medication from inventory
-//     Input: medication_id (from PatientMedication table)
-//     Creates: Order directly from a medication that's already in the patient's inventory
-//     Use case: Patient has an active medication (already being taken) and needs more pills
-
 // ─── POST /meds/inventory/refill ─────────────────────────────────────────────
 const triggerRefill = async (req, res) => {
   try {
-    const { medication_id, pharmacy_id, fulfillment_type, payment_method } =
-      req.body;
+    const { medication_id, pharmacy_id, fulfillment_type, payment_method } = req.body;
 
     if (!medication_id)
-      return errorResponse(
-        res,
-        "medication_id is required",
-        400,
-        "MISSING_FIELD",
-      );
+      return errorResponse(res, "medication_id is required", 400, "MISSING_FIELD");
 
     const med = await PatientMedication.findOne({
       where: { id: medication_id, patient_id: req.user.id, status: "active" },
     });
+    
     if (!med)
-      return errorResponse(
-        res,
-        "Medication not found or inactive",
-        404,
-        "NOT_FOUND",
-      );
+      return errorResponse(res, "Medication not found or inactive", 404, "NOT_FOUND");
+
+    // Check if refills are available
+    if (med.refills_allowed !== null && med.refills_allowed > 0 && med.refills_used >= med.refills_allowed) {
+      return errorResponse(res, "No refills remaining for this medication", 400, "NO_REFILLS_LEFT");
+    }
 
     if (med.prescription_id) {
       const order = await Order.create({
@@ -596,24 +572,28 @@ const triggerRefill = async (req, res) => {
         patient_id: req.user.id,
         patient_name: req.user.full_name,
         patient_phone: req.user.phone_number,
+        patient_address: req.user.address,
         delivery_type: fulfillment_type || "home_delivery",
         payment_method: payment_method || "mpesa",
         status: "pending",
         payment_status: "unpaid",
       });
 
-      return successResponse(
-        res,
-        {
-          medication_id,
-          drug_name: med.drug_name,
-          order_id: order.id,
-          order_number: order.order_number,
-          status: order.status,
-        },
-        `Refill for ${med.drug_name} submitted`,
-        201,
-      );
+      // Increment refills used
+      const newRefillsUsed = (med.refills_used || 0) + 1;
+      await med.update({ 
+        refills_used: newRefillsUsed,
+        quantity_remaining: med.quantity_dispensed || med.quantity_remaining
+      });
+
+      return successResponse(res, {
+        medication_id,
+        drug_name: med.drug_name,
+        order_id: order.id,
+        order_number: order.order_number,
+        status: order.status,
+        refills_remaining: med.refills_allowed ? med.refills_allowed - newRefillsUsed : null,
+      }, `Refill for ${med.drug_name} submitted`, 201);
     }
 
     return successResponse(res, {
@@ -624,6 +604,7 @@ const triggerRefill = async (req, res) => {
       message: `${med.drug_name} is over-the-counter. Visit a nearby pharmacy to refill.`,
     });
   } catch (error) {
+    console.error("Refill error:", error);
     return errorResponse(res, error.message, 500, "REFILL_ERROR");
   }
 };
@@ -651,6 +632,12 @@ const bulkRefill = async (req, res) => {
           continue;
         }
 
+        // Check if refills are available
+        if (med.refills_allowed !== null && med.refills_allowed > 0 && med.refills_used >= med.refills_allowed) {
+          errors.push({ medication_id, drug_name: med.drug_name, error: "No refills remaining" });
+          continue;
+        }
+
         if (med.prescription_id) {
           const order = await Order.create({
             order_number: `ORD-${Date.now()}-${medication_id.slice(0, 4)}`,
@@ -659,10 +646,16 @@ const bulkRefill = async (req, res) => {
             patient_id: req.user.id,
             patient_name: req.user.full_name,
             patient_phone: req.user.phone_number,
+            patient_address: req.user.address,
             delivery_type: fulfillment_type || "home_delivery",
             payment_method: payment_method || "mpesa",
             status: "pending",
             payment_status: "unpaid",
+          });
+
+          await med.update({ 
+            refills_used: (med.refills_used || 0) + 1,
+            quantity_remaining: med.quantity_dispensed || med.quantity_remaining
           });
 
           results.push({
@@ -673,7 +666,6 @@ const bulkRefill = async (req, res) => {
             status: order.status,
           });
         } else {
-          // OTC medication
           results.push({
             medication_id,
             drug_name: med.drug_name,
@@ -698,6 +690,7 @@ const bulkRefill = async (req, res) => {
     }, `${results.length} of ${medication_ids.length} medications processed successfully`);
 
   } catch (error) {
+    console.error("Bulk refill error:", error);
     return errorResponse(res, error.message, 500, "BULK_REFILL_ERROR");
   }
 };
@@ -901,42 +894,30 @@ const searchMedicines = async (req, res) => {
   }
 };
 
-// ─── GET /meds/refillable-prescriptions ──────────────────────────────────────
+// ─── GET /meds/prescriptions/refillable ──────────────────────────────────────
 const getRefillablePrescriptions = async (req, res) => {
   try {
     const todayStr = getTodayLocal();
 
-    // Find prescriptions that are:
-    // 1. Active/valid
-    // 2. Not expired
-    // 3. Have remaining quantity
-    // 4. Not fully dispensed
     const prescriptions = await Prescription.findAll({
       where: {
         patient_id: req.user.id,
-        status: { [Op.in]: ["active", "dispensed", "partially_dispensed"] },
+        status: { [Op.in]: ["dispensed", "delivered"] },
         expiry_date: { [Op.gte]: todayStr },
-        [Op.or]: [
-          { total_refills_allowed: { [Op.gt]: sequelize.col("refills_used") } },
-          { is_refillable: true },
-        ],
       },
       include: [
         {
           model: User,
           as: "doctor",
-          attributes: ["id", "full_name", "specialization"],
+          attributes: ["id", "full_name", "specialty"], // Changed from "specialization" to "specialty"
         },
       ],
       order: [["created_at", "DESC"]],
     });
 
-    // Filter prescriptions that have remaining items
     const refillablePrescriptions = prescriptions.filter((p) => {
       const items = p.items || [];
-      return items.some(
-        (item) => (item.remaining_quantity || item.quantity || 0) > 0,
-      );
+      return items.some((item) => (item.quantity || 0) > 0);
     });
 
     const formattedPrescriptions = refillablePrescriptions.map((p) => ({
@@ -946,28 +927,24 @@ const getRefillablePrescriptions = async (req, res) => {
       expiry_date: p.expiry_date,
       diagnosis: p.diagnosis,
       doctor_name: p.doctor?.full_name,
-      doctor_specialization: p.doctor?.specialization,
+      doctor_specialization: p.doctor?.specialty, // Changed from "specialization" to "specialty"
       items: (p.items || [])
-        .filter((item) => (item.remaining_quantity || item.quantity || 0) > 0)
+        .filter((item) => (item.quantity || 0) > 0)
         .map((item) => ({
           drug_name: item.drug_name,
           dosage: item.dosage,
           dosage_form: item.dosage_form,
-          quantity: item.remaining_quantity || item.quantity,
-          unit_price: item.unit_price,
-          total_price:
-            (item.remaining_quantity || item.quantity) * (item.unit_price || 0),
+          quantity: item.quantity,
+          unit_price: item.unit_price || 0,
+          total_price: (item.quantity || 0) * (item.unit_price || 0),
           instructions: item.instructions,
+          frequency: item.frequency,
+          duration_days: item.duration_days,
         })),
       total_amount: (p.items || []).reduce(
-        (sum, item) =>
-          sum +
-          (item.remaining_quantity || item.quantity || 0) *
-            (item.unit_price || 0),
+        (sum, item) => sum + ((item.quantity || 0) * (item.unit_price || 0)),
         0,
       ),
-      refills_used: p.refills_used || 0,
-      total_refills_allowed: p.total_refills_allowed,
       status: p.status,
     }));
 
@@ -982,6 +959,7 @@ const getRefillablePrescriptions = async (req, res) => {
       },
     });
   } catch (error) {
+    console.error("Get refillable prescriptions error:", error);
     return errorResponse(
       res,
       error.message,
@@ -990,8 +968,7 @@ const getRefillablePrescriptions = async (req, res) => {
     );
   }
 };
-
-// ─── POST /meds/create-order-from-prescription ────────────────────────────────
+// ─── POST /meds/order/create ────────────────────────────────────────────────
 const createOrderFromPrescription = async (req, res) => {
   const t = await sequelize.transaction();
   try {
@@ -1002,7 +979,6 @@ const createOrderFromPrescription = async (req, res) => {
       return errorResponse(res, 'prescription_id is required', 400, 'MISSING_FIELD');
     }
 
-    // Get the prescription
     const prescription = await Prescription.findOne({
       where: {
         id: prescription_id,
@@ -1016,16 +992,19 @@ const createOrderFromPrescription = async (req, res) => {
       return errorResponse(res, 'Prescription not found', 404, 'NOT_FOUND');
     }
 
-    // Check if prescription is still valid
     const todayStr = getTodayLocal();
     if (prescription.expiry_date && prescription.expiry_date < todayStr) {
       await t.rollback();
       return errorResponse(res, 'Prescription has expired', 400, 'PRESCRIPTION_EXPIRED');
     }
 
-    // Calculate total amount from remaining items
+    if (!["dispensed", "delivered"].includes(prescription.status)) {
+      await t.rollback();
+      return errorResponse(res, 'Prescription is not available for refill', 400, 'INVALID_STATUS');
+    }
+
     const items = prescription.items || [];
-    const validItems = items.filter(item => (item.remaining_quantity || item.quantity || 0) > 0);
+    const validItems = items.filter(item => (item.quantity || 0) > 0);
     
     if (validItems.length === 0) {
       await t.rollback();
@@ -1033,10 +1012,9 @@ const createOrderFromPrescription = async (req, res) => {
     }
 
     const total_amount = validItems.reduce((sum, item) => 
-      sum + ((item.remaining_quantity || item.quantity || 0) * (item.unit_price || 0)), 0
+      sum + ((item.quantity || 0) * (item.unit_price || 0)), 0
     );
 
-    // Create order - MATCHING YOUR MODEL
     const order = await Order.create({
       order_number: `ORD-${Date.now()}-${prescription_id.slice(0, 4)}`,
       prescription_id: prescription.id,
@@ -1044,20 +1022,22 @@ const createOrderFromPrescription = async (req, res) => {
       patient_id: req.user.id,
       patient_name: req.user.full_name,
       patient_phone: req.user.phone_number,
-      patient_address: patient_address || req.user.address, // Using patient_address
-      delivery_type: delivery_type || 'home_delivery', // 'pickup' or 'home_delivery'
-      payment_method: payment_method || 'mpesa', // 'mpesa', 'cash', 'insurance', 'nhif'
+      patient_address: patient_address || req.user.address,
+      delivery_type: delivery_type || 'home_delivery',
+      payment_method: payment_method || 'mpesa',
       total_amount: total_amount,
       status: 'pending',
       payment_status: 'unpaid',
     }, { transaction: t });
 
-    // Update prescription refill count if needed
-    if (prescription.refills_used !== undefined) {
-      await prescription.update({
-        refills_used: (prescription.refills_used || 0) + 1
-      }, { transaction: t });
-    }
+    const updatedItems = items.map(item => ({
+      ...item,
+      quantity: 0
+    }));
+    
+    await prescription.update({ 
+      items: updatedItems
+    }, { transaction: t });
 
     await t.commit();
 
@@ -1078,7 +1058,7 @@ const createOrderFromPrescription = async (req, res) => {
   }
 };
 
-// ─── POST /meds/create-order-multiple ─────────────────────────────────────────
+// ─── POST /meds/orders/create-bulk ─────────────────────────────────────────
 const createOrdersFromPrescriptions = async (req, res) => {
   const t = await sequelize.transaction();
   try {
@@ -1090,75 +1070,107 @@ const createOrdersFromPrescriptions = async (req, res) => {
     }
 
     const orders = [];
+    const errors = [];
+
     for (const prescription_id of prescription_ids) {
-      const prescription = await Prescription.findOne({
-        where: {
-          id: prescription_id,
+      try {
+        const prescription = await Prescription.findOne({
+          where: {
+            id: prescription_id,
+            patient_id: req.user.id,
+          },
+          transaction: t,
+        });
+
+        if (!prescription) {
+          errors.push({ prescription_id, error: 'Prescription not found' });
+          continue;
+        }
+
+        const todayStr = getTodayLocal();
+        if (prescription.expiry_date && prescription.expiry_date < todayStr) {
+          errors.push({ 
+            prescription_id, 
+            prescription_number: prescription.prescription_number,
+            error: 'Prescription has expired' 
+          });
+          continue;
+        }
+
+        if (!["dispensed", "delivered"].includes(prescription.status)) {
+          errors.push({ 
+            prescription_id, 
+            prescription_number: prescription.prescription_number,
+            error: 'Prescription not available for refill' 
+          });
+          continue;
+        }
+
+        const items = prescription.items || [];
+        const validItems = items.filter(item => (item.quantity || 0) > 0);
+        
+        if (validItems.length === 0) {
+          errors.push({ 
+            prescription_id, 
+            prescription_number: prescription.prescription_number,
+            error: 'No remaining medications' 
+          });
+          continue;
+        }
+
+        const total_amount = validItems.reduce((sum, item) => 
+          sum + ((item.quantity || 0) * (item.unit_price || 0)), 0
+        );
+
+        const order = await Order.create({
+          order_number: `ORD-${Date.now()}-${prescription_id.slice(0, 4)}`,
+          prescription_id: prescription.id,
+          pharmacy_id: pharmacy_id || prescription.pharmacy_id,
           patient_id: req.user.id,
-        },
-        transaction: t,
-      });
-
-      if (!prescription) {
-        await t.rollback();
-        return errorResponse(res, `Prescription ${prescription_id} not found`, 404, 'NOT_FOUND');
-      }
-
-      const todayStr = getTodayLocal();
-      if (prescription.expiry_date && prescription.expiry_date < todayStr) {
-        await t.rollback();
-        return errorResponse(res, `Prescription ${prescription.prescription_number} has expired`, 400, 'PRESCRIPTION_EXPIRED');
-      }
-
-      const items = prescription.items || [];
-      const validItems = items.filter(item => (item.remaining_quantity || item.quantity || 0) > 0);
-      
-      if (validItems.length === 0) {
-        await t.rollback();
-        return errorResponse(res, `No remaining medications in prescription ${prescription.prescription_number}`, 400, 'NO_REMAINING_ITEMS');
-      }
-
-      const total_amount = validItems.reduce((sum, item) => 
-        sum + ((item.remaining_quantity || item.quantity || 0) * (item.unit_price || 0)), 0
-      );
-
-      const order = await Order.create({
-        order_number: `ORD-${Date.now()}-${prescription_id.slice(0, 4)}`,
-        prescription_id: prescription.id,
-        pharmacy_id: pharmacy_id || prescription.pharmacy_id,
-        patient_id: req.user.id,
-        patient_name: req.user.full_name,
-        patient_phone: req.user.phone_number,
-        patient_address: patient_address || req.user.address,
-        delivery_type: delivery_type || 'home_delivery',
-        payment_method: payment_method || 'mpesa',
-        total_amount: total_amount,
-        status: 'pending',
-        payment_status: 'unpaid',
-      }, { transaction: t });
-
-      if (prescription.refills_used !== undefined) {
-        await prescription.update({
-          refills_used: (prescription.refills_used || 0) + 1
+          patient_name: req.user.full_name,
+          patient_phone: req.user.phone_number,
+          patient_address: patient_address || req.user.address,
+          delivery_type: delivery_type || 'home_delivery',
+          payment_method: payment_method || 'mpesa',
+          total_amount: total_amount,
+          status: 'pending',
+          payment_status: 'unpaid',
         }, { transaction: t });
-      }
 
-      orders.push({
-        order_id: order.id,
-        order_number: order.order_number,
-        prescription_number: prescription.prescription_number,
-        total_amount: total_amount,
-      });
+        const updatedItems = items.map(item => ({
+          ...item,
+          quantity: 0
+        }));
+        
+        await prescription.update({ 
+          items: updatedItems
+        }, { transaction: t });
+
+        orders.push({
+          order_id: order.id,
+          order_number: order.order_number,
+          prescription_number: prescription.prescription_number,
+          total_amount: total_amount,
+        });
+
+      } catch (err) {
+        errors.push({ prescription_id, error: err.message });
+      }
     }
 
     await t.commit();
 
     return successResponse(res, {
+      summary: {
+        total_requested: prescription_ids.length,
+        successful: orders.length,
+        failed: errors.length,
+      },
       orders: orders,
-      total_orders: orders.length,
       total_amount: orders.reduce((sum, o) => sum + o.total_amount, 0),
-      message: `${orders.length} order(s) created successfully. Proceed to payment.`,
-    }, 'Orders created successfully', 201);
+      errors: errors.length ? errors : undefined,
+      message: `${orders.length} of ${prescription_ids.length} order(s) created successfully. Proceed to payment.`,
+    }, 'Orders processed successfully', 201);
 
   } catch (error) {
     await t.rollback();

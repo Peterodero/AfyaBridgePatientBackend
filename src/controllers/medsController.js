@@ -2,7 +2,7 @@ const { Op } = require('sequelize');
 const { models: {PatientMedication, Prescription, Order, User} } = require('../models/index.js');
 const { successResponse, errorResponse } = require('../utils/response');
 
-// ─── Helper ──────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const SLOT_CONFIG = {
   Morning:   { time: '08:00 AM', order: 0 },
@@ -36,11 +36,19 @@ function dosesPerDay(med) {
 }
 
 function currentSlot() {
-  const h = new Date().getHours();
-  if (h >= 5  && h < 12) return 'Morning';
+  // Use UTC to ensure consistency across all servers
+  const now = new Date();
+  const h = now.getUTCHours();
+  
+  if (h >= 5 && h < 12) return 'Morning';
   if (h >= 12 && h < 17) return 'Afternoon';
   if (h >= 17 && h < 21) return 'Evening';
   return 'Bedtime';
+}
+
+function getTodayUTC() {
+  const now = new Date();
+  return now.toISOString().split('T')[0];
 }
 
 function getSlotsForMed(med) {
@@ -54,7 +62,7 @@ function getSlotsForMed(med) {
 // Recalculate adherence_percentage from daily_log across all days
 function recalcAdherence(med, updatedLog) {
   const log = updatedLog || med.daily_log || {};
-  const today = new Date().toISOString().split('T')[0];
+  const today = getTodayUTC();
   const startDate = med.start_date;
   
   const dates = Object.keys(log).filter(date => {
@@ -82,8 +90,9 @@ const getMedsDashboard = async (req, res) => {
   try {
     const user     = req.user;
     const today    = new Date();
-    const todayStr = today.toISOString().split('T')[0];
+    const todayStr = getTodayUTC();
     const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const dayOfWeek = dayNames[today.getUTCDay()];
 
     const activeMeds = await PatientMedication.findAll({
       where: {
@@ -202,7 +211,6 @@ const getMedsDashboard = async (req, res) => {
     const doseAdherencePct = totalDoses > 0 ? Math.round((takenDoses / totalDoses) * 100) : 0;
     
     // Option B: Per-slot adherence (ALL or NOTHING approach)
-    // A slot is considered "completed" only if ALL medications in that slot are taken
     const slotCompletion = {};
     
     for (const med of activeMeds) {
@@ -303,18 +311,16 @@ const getMedsDashboard = async (req, res) => {
       user_metadata: {
         user_name:    user.full_name.split(' ')[0],
         today_date:   todayStr,
-        day_of_week:  dayNames[today.getDay()],
+        day_of_week:  dayOfWeek,
         days_remaining_to_take_medication:      daysRemainingToTake,
         days_total_duration_to_take_medication: daysTotalDuration,
       },
       adherence_summary: {
-        // Option A: Per-dose adherence (pill counting)
         dose_adherence: {
           percentage: doseAdherencePct,
           doses_taken: takenDoses,
           total_doses: totalDoses,
         },
-        // Option B: Per-slot adherence (ALL or NOTHING)
         slot_adherence: {
           percentage: slotAdherencePct,
           slots_completed: completedSlots,
@@ -416,7 +422,7 @@ const bulkSlotUpdate = async (req, res) => {
 // ─── GET /meds/inventory ──────────────────────────────────────────────────────
 const getInventory = async (req, res) => {
   try {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getTodayUTC();
 
     const meds = await PatientMedication.findAll({
       where: {
@@ -631,7 +637,7 @@ const submitRefill = async (req, res) => {
 const searchMedicines = async (req, res) => {
   try {
     const { q } = req.query;
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getTodayUTC();
 
     const meds = await PatientMedication.findAll({
       where: {

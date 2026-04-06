@@ -558,6 +558,11 @@ const getInventory = async (req, res) => {
   }
 };
 
+//     Purpose: Refill a single medication from inventory
+//     Input: medication_id (from PatientMedication table)
+//     Creates: Order directly from a medication that's already in the patient's inventory
+//     Use case: Patient has an active medication (already being taken) and needs more pills
+
 // ─── POST /meds/inventory/refill ─────────────────────────────────────────────
 const triggerRefill = async (req, res) => {
   try {
@@ -620,6 +625,80 @@ const triggerRefill = async (req, res) => {
     });
   } catch (error) {
     return errorResponse(res, error.message, 500, "REFILL_ERROR");
+  }
+};
+
+// ─── POST /meds/inventory/refill-bulk ─────────────────────────────────────────
+const bulkRefill = async (req, res) => {
+  try {
+    const { medication_ids, pharmacy_id, fulfillment_type, payment_method } = req.body;
+
+    if (!medication_ids || !medication_ids.length) {
+      return errorResponse(res, 'medication_ids array is required', 400, 'MISSING_FIELD');
+    }
+
+    const results = [];
+    const errors = [];
+
+    for (const medication_id of medication_ids) {
+      try {
+        const med = await PatientMedication.findOne({
+          where: { id: medication_id, patient_id: req.user.id, status: "active" },
+        });
+
+        if (!med) {
+          errors.push({ medication_id, error: "Medication not found or inactive" });
+          continue;
+        }
+
+        if (med.prescription_id) {
+          const order = await Order.create({
+            order_number: `ORD-${Date.now()}-${medication_id.slice(0, 4)}`,
+            prescription_id: med.prescription_id,
+            pharmacy_id: pharmacy_id || med.pharmacy_id,
+            patient_id: req.user.id,
+            patient_name: req.user.full_name,
+            patient_phone: req.user.phone_number,
+            delivery_type: fulfillment_type || "home_delivery",
+            payment_method: payment_method || "mpesa",
+            status: "pending",
+            payment_status: "unpaid",
+          });
+
+          results.push({
+            medication_id,
+            drug_name: med.drug_name,
+            order_id: order.id,
+            order_number: order.order_number,
+            status: order.status,
+          });
+        } else {
+          // OTC medication
+          results.push({
+            medication_id,
+            drug_name: med.drug_name,
+            is_otc: med.is_otc,
+            action: "visit_pharmacy",
+            message: `${med.drug_name} is over-the-counter. Visit a nearby pharmacy to refill.`,
+          });
+        }
+      } catch (err) {
+        errors.push({ medication_id, error: err.message });
+      }
+    }
+
+    return successResponse(res, {
+      summary: {
+        total_requested: medication_ids.length,
+        successful: results.length,
+        failed: errors.length,
+      },
+      results,
+      errors: errors.length ? errors : undefined,
+    }, `${results.length} of ${medication_ids.length} medications processed successfully`);
+
+  } catch (error) {
+    return errorResponse(res, error.message, 500, "BULK_REFILL_ERROR");
   }
 };
 
@@ -1093,6 +1172,7 @@ module.exports = {
   bulkSlotUpdate,
   getInventory,
   triggerRefill,
+  bulkRefill,
   getRefillableMeds,
   selectMedication,
   submitRefill,

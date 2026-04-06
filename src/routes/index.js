@@ -274,6 +274,17 @@ medsRouter.post(
   medsController.triggerRefill,
 );
 
+medsRouter.post(
+  "/inventory/refill-bulk",
+  authenticate,
+  [
+    body("medication_ids").isArray().withMessage("medication_ids array is required"),
+    body("medication_ids.*").isUUID().withMessage("Each medication_id must be a valid UUID"),
+    validate,
+  ],
+  medsController.bulkRefill
+);
+
 // ─── NEW: Prescription to Order Routes ─────────────────────────────────────────
 
 // Get refillable prescriptions (active, not expired, with remaining quantity)

@@ -1,4 +1,4 @@
-const { models:{Order, Delivery, Prescription, Wallet, Transaction} } = require('../models/index.js');
+const { models: { Order, Delivery, Prescription, Wallet, Transaction } } = require('../models/index.js');
 const { successResponse, errorResponse } = require('../utils/response');
 const { sequelize } = require('../config/database');
 
@@ -68,6 +68,7 @@ const getOrderSummary = async (req, res) => {
       topUpRequired: canPayFromWallet ? 0 : Math.max(0, parseFloat(order.total_amount || 0) - walletBalance),
     });
   } catch (error) {
+    console.error('Order summary error:', error);
     return errorResponse(res, error.message, 500, 'ORDER_SUMMARY_ERROR');
   }
 };
@@ -75,15 +76,22 @@ const getOrderSummary = async (req, res) => {
 // POST /orders/:orderId/pay
 // Supports two payment methods:
 //   paymentMethod: "wallet"  → debit wallet immediately, order marked paid
-//   paymentMethod: "mpesa"   → forward to pharmacy backend for STK push
+//   paymentMethod: "mpesa"   → coming soon
 const initiatePayment = async (req, res) => {
   const t = await sequelize.transaction();
   try {
     const { orderId } = req.params;
     const { paymentMethod = 'wallet', phoneNumber } = req.body;
 
-    const order = await Order.findOne({ where: { id: orderId, patient_id: req.user.id }, transaction: t });
-    if (!order) { await t.rollback(); return errorResponse(res, 'Order not found', 404, 'NOT_FOUND'); }
+    const order = await Order.findOne({ 
+      where: { id: orderId, patient_id: req.user.id }, 
+      transaction: t 
+    });
+    
+    if (!order) { 
+      await t.rollback(); 
+      return errorResponse(res, 'Order not found', 404, 'NOT_FOUND'); 
+    }
 
     if (order.payment_status === 'paid') {
       await t.rollback();
@@ -128,10 +136,17 @@ const initiatePayment = async (req, res) => {
       }, 'Payment successful');
     }
 
+    // ── M-Pesa payment (Coming Soon) ────────────────────────────────
+    if (paymentMethod === 'mpesa') {
+      await t.rollback();
+      return errorResponse(res, 'M-Pesa payment is coming soon. Please use wallet payment for now.', 503, 'MPESA_COMING_SOON');
+    }
+
     await t.rollback();
-    return errorResponse(res, 'Invalid payment method. Use wallet or mpesa.', 400, 'INVALID_PAYMENT_METHOD');
+    return errorResponse(res, 'Invalid payment method. Use wallet.', 400, 'INVALID_PAYMENT_METHOD');
   } catch (error) {
     await t.rollback();
+    console.error('Payment initiation error:', error);
     return errorResponse(res, error.message, 500, 'INITIATE_PAYMENT_ERROR');
   }
 };
@@ -164,6 +179,7 @@ const getPaymentStatus = async (req, res) => {
       paidAt: walletTransaction?.transacted_at || null,
     });
   } catch (error) {
+    console.error('Payment status error:', error);
     return errorResponse(res, error.message, 500, 'PAYMENT_STATUS_ERROR');
   }
 };
@@ -198,6 +214,7 @@ const getOrderConfirmation = async (req, res) => {
       ],
     });
   } catch (error) {
+    console.error('Order confirmation error:', error);
     return errorResponse(res, error.message, 500, 'ORDER_CONFIRMATION_ERROR');
   }
 };
@@ -212,11 +229,34 @@ const trackDelivery = async (req, res) => {
 
     const delivery = await Delivery.findOne({ where: { order_id: orderId } });
 
+    // Build timeline based on actual order and delivery status
     const timeline = [
-      { status: 'Order Confirmed', description: 'Your order has been confirmed', completed: true },
-      { status: 'Picked Up', description: 'Rider picked up order from pharmacy', completed: ['out_for_delivery', 'delivered'].includes(delivery?.status) },
-      { status: 'Out for Delivery', description: 'Your order is on the way', completed: delivery?.status === 'delivered', active: delivery?.status === 'out_for_delivery' },
-      { status: 'Delivered', description: 'Order delivered to you', completed: delivery?.status === 'delivered' },
+      { 
+        status: 'Order Confirmed', 
+        description: 'Your order has been confirmed', 
+        completed: order.status !== 'pending' 
+      },
+      { 
+        status: 'Processing', 
+        description: 'Pharmacy is preparing your order', 
+        completed: ['ready', 'dispatched', 'delivered'].includes(order.status) 
+      },
+      { 
+        status: 'Picked Up', 
+        description: 'Rider picked up order from pharmacy', 
+        completed: delivery?.status === 'picked_up' || delivery?.status === 'out_for_delivery' || delivery?.status === 'delivered' 
+      },
+      { 
+        status: 'Out for Delivery', 
+        description: 'Your order is on the way', 
+        completed: delivery?.status === 'delivered', 
+        active: delivery?.status === 'out_for_delivery' 
+      },
+      { 
+        status: 'Delivered', 
+        description: 'Order delivered to you', 
+        completed: delivery?.status === 'delivered' 
+      },
     ];
 
     return successResponse(res, {
@@ -231,11 +271,12 @@ const trackDelivery = async (req, res) => {
         dropoffLocation: delivery.dropoff_location,
       } : null,
       mapData: delivery ? {
-        pickup: { lat: delivery.pickup_lat, lng: delivery.pickup_lng },
-        dropoff: { lat: delivery.dropoff_lat, lng: delivery.dropoff_lng },
+        pickup: { lat: parseFloat(delivery.pickup_lat), lng: parseFloat(delivery.pickup_lng) },
+        dropoff: { lat: parseFloat(delivery.dropoff_lat), lng: parseFloat(delivery.dropoff_lng) },
       } : null,
     });
   } catch (error) {
+    console.error('Track delivery error:', error);
     return errorResponse(res, error.message, 500, 'TRACK_DELIVERY_ERROR');
   }
 };
@@ -254,6 +295,7 @@ const contactCourier = async (req, res) => {
       phoneNumber: delivery.pickup_contact,
     });
   } catch (error) {
+    console.error('Contact courier error:', error);
     return errorResponse(res, error.message, 500, 'CONTACT_COURIER_ERROR');
   }
 };

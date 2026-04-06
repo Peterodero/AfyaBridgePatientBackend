@@ -36,9 +36,9 @@ function dosesPerDay(med) {
 }
 
 function currentSlot() {
-  // Use UTC to ensure consistency across all servers
+  // Use LOCAL time for slot calculation since slot times are in local time
   const now = new Date();
-  const h = now.getUTCHours();
+  const h = now.getHours(); // Use local hours, not UTC
   
   if (h >= 5 && h < 12) return 'Morning';
   if (h >= 12 && h < 17) return 'Afternoon';
@@ -46,9 +46,12 @@ function currentSlot() {
   return 'Bedtime';
 }
 
-function getTodayUTC() {
+function getTodayLocal() {
   const now = new Date();
-  return now.toISOString().split('T')[0];
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function getSlotsForMed(med) {
@@ -62,7 +65,7 @@ function getSlotsForMed(med) {
 // Recalculate adherence_percentage from daily_log across all days
 function recalcAdherence(med, updatedLog) {
   const log = updatedLog || med.daily_log || {};
-  const today = getTodayUTC();
+  const today = getTodayLocal();
   const startDate = med.start_date;
   
   const dates = Object.keys(log).filter(date => {
@@ -90,9 +93,9 @@ const getMedsDashboard = async (req, res) => {
   try {
     const user     = req.user;
     const today    = new Date();
-    const todayStr = getTodayUTC();
+    const todayStr = getTodayLocal();
     const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-    const dayOfWeek = dayNames[today.getUTCDay()];
+    const dayOfWeek = dayNames[today.getDay()];
 
     const activeMeds = await PatientMedication.findAll({
       where: {
@@ -422,7 +425,7 @@ const bulkSlotUpdate = async (req, res) => {
 // ─── GET /meds/inventory ──────────────────────────────────────────────────────
 const getInventory = async (req, res) => {
   try {
-    const todayStr = getTodayUTC();
+    const todayStr = getTodayLocal();
 
     const meds = await PatientMedication.findAll({
       where: {
@@ -637,7 +640,7 @@ const submitRefill = async (req, res) => {
 const searchMedicines = async (req, res) => {
   try {
     const { q } = req.query;
-    const todayStr = getTodayUTC();
+    const todayStr = getTodayLocal();
 
     const meds = await PatientMedication.findAll({
       where: {

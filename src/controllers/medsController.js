@@ -35,22 +35,44 @@ function dosesPerDay(med) {
   return 1;
 }
 
-function currentSlot() {
-  // Use LOCAL time for slot calculation since slot times are in local time
-  const now = new Date();
-  const h = now.getHours(); // Use local hours, not UTC
+// function currentSlot() {
+//   // Use LOCAL time for slot calculation since slot times are in local time
+//   const now = new Date();
+//   const h = now.getHours(); // Use local hours, not UTC
   
-  if (h >= 5 && h < 12) return 'Morning';
+//   if (h >= 5 && h < 12) return 'Morning';
+//   if (h >= 12 && h < 17) return 'Afternoon';
+//   if (h >= 17 && h < 21) return 'Evening';
+//   return 'Bedtime';
+// }
+
+// function getTodayLocal() {
+//   const now = new Date();
+//   const year = now.getFullYear();
+//   const month = String(now.getMonth() + 1).padStart(2, '0');
+//   const day = String(now.getDate()).padStart(2, '0');
+//   return `${year}-${month}-${day}`;
+// }
+
+const EAT_OFFSET_MS = 3 * 60 * 60 * 1000;
+
+function getEATDate() {
+  return new Date(Date.now() + EAT_OFFSET_MS);
+}
+
+function currentSlot() {
+  const h = getEATDate().getUTCHours();
+  if (h >= 5  && h < 12) return 'Morning';
   if (h >= 12 && h < 17) return 'Afternoon';
   if (h >= 17 && h < 21) return 'Evening';
   return 'Bedtime';
 }
 
 function getTodayLocal() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
+  const eat   = getEATDate();
+  const year  = eat.getUTCFullYear();
+  const month = String(eat.getUTCMonth() + 1).padStart(2, '0');
+  const day   = String(eat.getUTCDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
 
@@ -92,7 +114,7 @@ function recalcAdherence(med, updatedLog) {
 const getMedsDashboard = async (req, res) => {
   try {
     const user     = req.user;
-    const today    = new Date();
+    const today    = getEATDate();
     const todayStr = getTodayLocal();
     const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
     const dayOfWeek = dayNames[today.getDay()];

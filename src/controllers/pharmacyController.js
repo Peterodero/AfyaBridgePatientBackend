@@ -32,6 +32,8 @@ const getNearbyPharmacies = async (req, res) => {
       pharmacies: nearby.map((p) => ({
         id: p.id,
         name: p.name,
+        latitude: p.gps_lat,
+        longitude: p.gps_lng,
         address: `${p.address_line1}${p.address_line2 ? ', ' + p.address_line2 : ''}, ${p.county}`,
         phone: p.phone,
         distance: `${p.distance} km`,

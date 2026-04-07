@@ -1,7 +1,7 @@
 const { sequelize } = require('../config/database');
 const { Op } = require("sequelize");
 const {
-  models: { PatientMedication, Prescription, Order, User },
+  models: { PatientMedication, Prescription, Order, User,Drug },
 } = require("../models/index.js");
 const { successResponse, errorResponse } = require("../utils/response");
 
@@ -897,6 +897,9 @@ const searchMedicines = async (req, res) => {
 // ─── GET /meds/prescriptions ──────────────────────────────────────────────
 const getMyPrescriptions = async (req, res) => {
   try {
+    const { pharmacy_id } = req.query; // Optional pharmacy_id for pricing
+    const todayStr = getTodayLocal();
+
     const prescriptions = await Prescription.findAll({
       where: {
         patient_id: req.user.id,
@@ -911,36 +914,98 @@ const getMyPrescriptions = async (req, res) => {
       order: [["created_at", "DESC"]],
     });
 
-    const formattedPrescriptions = prescriptions.map((p) => ({
-      id: p.id,
-      prescription_number: p.prescription_number,
-      issue_date: p.issue_date,
-      expiry_date: p.expiry_date,
-      diagnosis: p.diagnosis,
-      doctor_name: p.doctor?.full_name,
-      doctor_specialization: p.doctor?.specialty,
-      status: p.status,
-      items: (p.items || []).map((item) => ({
-        drug_name: item.name,        // ← FIXED: Use 'name' from database
-        dosage: item.dosage,
-        dosage_form: item.dosage_form,
-        quantity: item.quantity,
-        instructions: item.instructions,
-        frequency: item.frequency,
-        duration: item.duration,
-      })),
-      is_refillable: ["dispensed", "delivered"].includes(p.status) && 
-                     (p.items || []).some(item => (item.quantity || 0) > 0),
-    }));
+    // If pharmacy_id provided, fetch drug prices for that pharmacy
+    let drugPriceMap = new Map(); // key: drug_name, value: unit_price
+    if (pharmacy_id) {
+      // Collect all unique drug names from all prescriptions
+      const drugNames = new Set();
+      for (const p of prescriptions) {
+        for (const item of p.items || []) {
+          if (item.name) drugNames.add(item.name);
+        }
+      }
+
+      if (drugNames.size > 0) {
+        const drugs = await Drug.findAll({
+          where: {
+            pharmacy_id: pharmacy_id,
+            drug_name: { [Op.in]: Array.from(drugNames) },
+            is_active: true,
+          },
+          attributes: ["drug_name", "unit_price"],
+        });
+        for (const drug of drugs) {
+          drugPriceMap.set(drug.drug_name, parseFloat(drug.unit_price));
+        }
+      }
+    }
+
+    const formattedPrescriptions = prescriptions.map((p) => {
+      const itemsWithPrices = (p.items || []).map((item) => {
+        let unit_price = null;
+        let total_price = null;
+
+        if (pharmacy_id) {
+          unit_price = drugPriceMap.get(item.name) || 0;
+          total_price = unit_price * (item.quantity || 0);
+        }
+
+        return {
+          drug_name: item.name,
+          dosage: item.dosage,
+          dosage_form: item.dosage_form,
+          quantity: item.quantity,
+          unit_price: unit_price,
+          total_price: total_price,
+          instructions: item.instructions,
+          frequency: item.frequency,
+          duration: item.duration,
+        };
+      });
+
+      // Calculate total amount for the prescription if pharmacy selected
+      let total_amount = 0;
+      if (pharmacy_id) {
+        total_amount = itemsWithPrices.reduce(
+          (sum, item) => sum + (item.total_price || 0),
+          0
+        );
+      }
+
+      return {
+        id: p.id,
+        prescription_number: p.prescription_number,
+        issue_date: p.issue_date,
+        expiry_date: p.expiry_date,
+        diagnosis: p.diagnosis,
+        doctor_name: p.doctor?.full_name,
+        doctor_specialization: p.doctor?.specialty,
+        status: p.status,
+        items: itemsWithPrices,
+        total_amount: total_amount,
+        is_refillable: ["dispensed", "delivered"].includes(p.status) && 
+                       (p.items || []).some(item => (item.quantity || 0) > 0),
+        is_expired: p.expiry_date && p.expiry_date < todayStr,
+      };
+    });
+
+    // Summary statistics
+    const summary = {
+      total: formattedPrescriptions.length,
+      pending: formattedPrescriptions.filter(p => p.status === 'pending').length,
+      dispensed: formattedPrescriptions.filter(p => p.status === 'dispensed').length,
+      delivered: formattedPrescriptions.filter(p => p.status === 'delivered').length,
+      expired: formattedPrescriptions.filter(p => p.is_expired).length,
+      refillable: formattedPrescriptions.filter(p => p.is_refillable).length,
+    };
 
     return successResponse(res, {
       prescriptions: formattedPrescriptions,
-      summary: {
-        total: formattedPrescriptions.length,
-        new: formattedPrescriptions.filter(p => p.status === 'pending').length,
-        dispensed: formattedPrescriptions.filter(p => p.status === 'dispensed').length,
-        expired: formattedPrescriptions.filter(p => p.expiry_date && p.expiry_date < getTodayLocal()).length,
-      },
+      summary,
+      pharmacy_id_used: pharmacy_id || null,
+      message: pharmacy_id 
+        ? "Prices shown for selected pharmacy" 
+        : "Select a pharmacy to see current drug prices",
     });
   } catch (error) {
     console.error("Get prescriptions error:", error);
@@ -949,10 +1014,13 @@ const getMyPrescriptions = async (req, res) => {
 };
 
 // ─── GET /meds/prescriptions/refillable ──────────────────────────────────────
+// Optional query param: ?pharmacy_id=... to get prices from a specific pharmacy
 const getRefillablePrescriptions = async (req, res) => {
   try {
     const todayStr = getTodayLocal();
+    const { pharmacy_id } = req.query; // optional
 
+    // Fetch prescriptions eligible for refill
     const prescriptions = await Prescription.findAll({
       where: {
         patient_id: req.user.id,
@@ -963,44 +1031,93 @@ const getRefillablePrescriptions = async (req, res) => {
         {
           model: User,
           as: "doctor",
-          attributes: ["id", "full_name", "specialty"], // Changed from "specialization" to "specialty"
+          attributes: ["id", "full_name", "specialty"],
         },
       ],
       order: [["created_at", "DESC"]],
     });
 
+    // If pharmacy_id provided, fetch all relevant drug prices for that pharmacy
+    let drugPriceMap = new Map(); // key: drug_name, value: unit_price
+    if (pharmacy_id) {
+      const drugNames = new Set();
+      for (const p of prescriptions) {
+        for (const item of p.items || []) {
+          if (item.drug_name) drugNames.add(item.drug_name);
+        }
+      }
+      if (drugNames.size > 0) {
+        const drugs = await Drug.findAll({
+          where: {
+            pharmacy_id: pharmacy_id,
+            drug_name: { [Op.in]: Array.from(drugNames) },
+            is_active: true,
+          },
+          attributes: ["drug_name", "unit_price"],
+        });
+        for (const drug of drugs) {
+          drugPriceMap.set(drug.drug_name, parseFloat(drug.unit_price));
+        }
+      }
+    }
+
+    // Build response with prices (or defaults)
     const refillablePrescriptions = prescriptions.filter((p) => {
       const items = p.items || [];
       return items.some((item) => (item.quantity || 0) > 0);
     });
 
-    const formattedPrescriptions = refillablePrescriptions.map((p) => ({
-      id: p.id,
-      prescription_number: p.prescription_number,
-      issue_date: p.issue_date,
-      expiry_date: p.expiry_date,
-      diagnosis: p.diagnosis,
-      doctor_name: p.doctor?.full_name,
-      doctor_specialization: p.doctor?.specialty, // Changed from "specialization" to "specialty"
-      items: (p.items || [])
+    const formattedPrescriptions = refillablePrescriptions.map((p) => {
+      const itemsWithPrices = (p.items || [])
         .filter((item) => (item.quantity || 0) > 0)
-        .map((item) => ({
-          drug_name: item.drug_name,
-          dosage: item.dosage,
-          dosage_form: item.dosage_form,
-          quantity: item.quantity,
-          unit_price: item.unit_price || 0,
-          total_price: (item.quantity || 0) * (item.unit_price || 0),
-          instructions: item.instructions,
-          frequency: item.frequency,
-          duration_days: item.duration_days,
-        })),
-      total_amount: (p.items || []).reduce(
-        (sum, item) => sum + ((item.quantity || 0) * (item.unit_price || 0)),
-        0,
-      ),
-      status: p.status,
-    }));
+        .map((item) => {
+          let unit_price = drugPriceMap.get(item.drug_name);
+          let priceAvailable = !!unit_price;
+          if (!priceAvailable && pharmacy_id) {
+            // If pharmacy was specified but price missing, default to 0 and mark as unavailable
+            unit_price = 0;
+          } else if (!pharmacy_id) {
+            // No pharmacy selected, don't show prices
+            unit_price = null;
+          }
+          const total_price = (unit_price || 0) * (item.quantity || 0);
+          return {
+            drug_name: item.drug_name,
+            dosage: item.dosage,
+            dosage_form: item.dosage_form,
+            quantity: item.quantity,
+            unit_price: unit_price,
+            total_price: total_price,
+            instructions: item.instructions,
+            frequency: item.frequency,
+            duration_days: item.duration_days,
+            price_available: priceAvailable,
+          };
+        });
+
+      // Calculate total amount only if prices are available
+      let total_amount = 0;
+      if (pharmacy_id) {
+        total_amount = itemsWithPrices.reduce(
+          (sum, item) => sum + (item.total_price || 0),
+          0
+        );
+      }
+
+      return {
+        id: p.id,
+        prescription_number: p.prescription_number,
+        issue_date: p.issue_date,
+        expiry_date: p.expiry_date,
+        diagnosis: p.diagnosis,
+        doctor_name: p.doctor?.full_name,
+        doctor_specialization: p.doctor?.specialty,
+        items: itemsWithPrices,
+        total_amount: total_amount,
+        status: p.status,
+        requires_pharmacy_selection: !pharmacy_id, // flag for frontend
+      };
+    });
 
     return successResponse(res, {
       prescriptions: formattedPrescriptions,
@@ -1008,9 +1125,13 @@ const getRefillablePrescriptions = async (req, res) => {
         total: formattedPrescriptions.length,
         total_amount: formattedPrescriptions.reduce(
           (sum, p) => sum + p.total_amount,
-          0,
+          0
         ),
       },
+      pharmacy_id_used: pharmacy_id || null,
+      message: pharmacy_id
+        ? "Prices shown for selected pharmacy"
+        : "Select a pharmacy to see current drug prices",
     });
   } catch (error) {
     console.error("Get refillable prescriptions error:", error);
@@ -1018,10 +1139,11 @@ const getRefillablePrescriptions = async (req, res) => {
       res,
       error.message,
       500,
-      "GET_REFILLABLE_PRESCRIPTIONS_ERROR",
+      "GET_REFILLABLE_PRESCRIPTIONS_ERROR"
     );
   }
 };
+
 // ─── POST /meds/order/create ────────────────────────────────────────────────
 const createOrderFromPrescription = async (req, res) => {
   const t = await sequelize.transaction();

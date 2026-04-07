@@ -41,6 +41,12 @@ module.exports = (sequelize) => {
     patient_address: {
       type: DataTypes.TEXT,
     },
+    patient_lat: {
+      type: DataTypes.DOUBLE,
+    },
+    patient_lng: {
+      type: DataTypes.DOUBLE,
+    },
 
     // ─── Order Details ─────────────────────────────────────────
     delivery_type: {

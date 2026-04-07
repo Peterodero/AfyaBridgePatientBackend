@@ -1,7 +1,7 @@
-const { sequelize } = require('../config/database');
+const { sequelize } = require("../config/database");
 const { Op } = require("sequelize");
 const {
-  models: { PatientMedication, Prescription, Order, User,Drug },
+  models: { PatientMedication, Prescription, Order, User, Drug },
 } = require("../models/index.js");
 const { successResponse, errorResponse } = require("../utils/response");
 
@@ -524,7 +524,9 @@ const getInventory = async (req, res) => {
         next_refill_date: med.next_refill_date,
         is_chronic: med.is_chronic,
         prescription_id: med.prescription_id,
-        refills_remaining: med.refills_allowed ? med.refills_allowed - (med.refills_used || 0) : null,
+        refills_remaining: med.refills_allowed
+          ? med.refills_allowed - (med.refills_used || 0)
+          : null,
         unit: "pills",
       };
     });
@@ -547,21 +549,48 @@ const getInventory = async (req, res) => {
 // ─── POST /meds/inventory/refill ─────────────────────────────────────────────
 const triggerRefill = async (req, res) => {
   try {
-    const { medication_id, pharmacy_id, fulfillment_type, payment_method } = req.body;
+    const {
+      medication_id,
+      pharmacy_id,
+      fulfillment_type,
+      payment_method,
+      patient_address,
+      patient_lat,
+      patient_lng,
+    } = req.body;
 
     if (!medication_id)
-      return errorResponse(res, "medication_id is required", 400, "MISSING_FIELD");
+      return errorResponse(
+        res,
+        "medication_id is required",
+        400,
+        "MISSING_FIELD",
+      );
 
     const med = await PatientMedication.findOne({
       where: { id: medication_id, patient_id: req.user.id, status: "active" },
     });
-    
+
     if (!med)
-      return errorResponse(res, "Medication not found or inactive", 404, "NOT_FOUND");
+      return errorResponse(
+        res,
+        "Medication not found or inactive",
+        404,
+        "NOT_FOUND",
+      );
 
     // Check if refills are available
-    if (med.refills_allowed !== null && med.refills_allowed > 0 && med.refills_used >= med.refills_allowed) {
-      return errorResponse(res, "No refills remaining for this medication", 400, "NO_REFILLS_LEFT");
+    if (
+      med.refills_allowed !== null &&
+      med.refills_allowed > 0 &&
+      med.refills_used >= med.refills_allowed
+    ) {
+      return errorResponse(
+        res,
+        "No refills remaining for this medication",
+        400,
+        "NO_REFILLS_LEFT",
+      );
     }
 
     if (med.prescription_id) {
@@ -571,8 +600,10 @@ const triggerRefill = async (req, res) => {
         pharmacy_id: pharmacy_id || med.pharmacy_id,
         patient_id: req.user.id,
         patient_name: req.user.full_name,
+        patient_lat: patient_lat || req.user.gps_lat,
+        patient_lng: patient_lng || req.user.gps_lng,
         patient_phone: req.user.phone_number,
-        patient_address: req.user.address,
+        patient_address: patient_address || req.user.address,
         delivery_type: fulfillment_type || "home_delivery",
         payment_method: payment_method || "mpesa",
         status: "pending",
@@ -581,19 +612,26 @@ const triggerRefill = async (req, res) => {
 
       // Increment refills used
       const newRefillsUsed = (med.refills_used || 0) + 1;
-      await med.update({ 
+      await med.update({
         refills_used: newRefillsUsed,
-        quantity_remaining: med.quantity_dispensed || med.quantity_remaining
+        quantity_remaining: med.quantity_dispensed || med.quantity_remaining,
       });
 
-      return successResponse(res, {
-        medication_id,
-        drug_name: med.drug_name,
-        order_id: order.id,
-        order_number: order.order_number,
-        status: order.status,
-        refills_remaining: med.refills_allowed ? med.refills_allowed - newRefillsUsed : null,
-      }, `Refill for ${med.drug_name} submitted`, 201);
+      return successResponse(
+        res,
+        {
+          medication_id,
+          drug_name: med.drug_name,
+          order_id: order.id,
+          order_number: order.order_number,
+          status: order.status,
+          refills_remaining: med.refills_allowed
+            ? med.refills_allowed - newRefillsUsed
+            : null,
+        },
+        `Refill for ${med.drug_name} submitted`,
+        201,
+      );
     }
 
     return successResponse(res, {
@@ -612,10 +650,23 @@ const triggerRefill = async (req, res) => {
 // ─── POST /meds/inventory/refill-bulk ─────────────────────────────────────────
 const bulkRefill = async (req, res) => {
   try {
-    const { medication_ids, pharmacy_id, fulfillment_type, payment_method } = req.body;
+    const {
+      medication_ids,
+      pharmacy_id,
+      patient_lat,
+      patient_lng,
+      fulfillment_type,
+      payment_method,
+      patient_address,
+    } = req.body;
 
     if (!medication_ids || !medication_ids.length) {
-      return errorResponse(res, 'medication_ids array is required', 400, 'MISSING_FIELD');
+      return errorResponse(
+        res,
+        "medication_ids array is required",
+        400,
+        "MISSING_FIELD",
+      );
     }
 
     const results = [];
@@ -624,17 +675,32 @@ const bulkRefill = async (req, res) => {
     for (const medication_id of medication_ids) {
       try {
         const med = await PatientMedication.findOne({
-          where: { id: medication_id, patient_id: req.user.id, status: "active" },
+          where: {
+            id: medication_id,
+            patient_id: req.user.id,
+            status: "active",
+          },
         });
 
         if (!med) {
-          errors.push({ medication_id, error: "Medication not found or inactive" });
+          errors.push({
+            medication_id,
+            error: "Medication not found or inactive",
+          });
           continue;
         }
 
         // Check if refills are available
-        if (med.refills_allowed !== null && med.refills_allowed > 0 && med.refills_used >= med.refills_allowed) {
-          errors.push({ medication_id, drug_name: med.drug_name, error: "No refills remaining" });
+        if (
+          med.refills_allowed !== null &&
+          med.refills_allowed > 0 &&
+          med.refills_used >= med.refills_allowed
+        ) {
+          errors.push({
+            medication_id,
+            drug_name: med.drug_name,
+            error: "No refills remaining",
+          });
           continue;
         }
 
@@ -645,17 +711,20 @@ const bulkRefill = async (req, res) => {
             pharmacy_id: pharmacy_id || med.pharmacy_id,
             patient_id: req.user.id,
             patient_name: req.user.full_name,
+            patient_lat: patient_lat || req.user.gps_lat,
+            patient_lng: patient_lng || req.user.gps_lng,
             patient_phone: req.user.phone_number,
-            patient_address: req.user.address,
+            patient_address: patient_address || req.user.address,
             delivery_type: fulfillment_type || "home_delivery",
             payment_method: payment_method || "mpesa",
             status: "pending",
             payment_status: "unpaid",
           });
 
-          await med.update({ 
+          await med.update({
             refills_used: (med.refills_used || 0) + 1,
-            quantity_remaining: med.quantity_dispensed || med.quantity_remaining
+            quantity_remaining:
+              med.quantity_dispensed || med.quantity_remaining,
           });
 
           results.push({
@@ -679,16 +748,19 @@ const bulkRefill = async (req, res) => {
       }
     }
 
-    return successResponse(res, {
-      summary: {
-        total_requested: medication_ids.length,
-        successful: results.length,
-        failed: errors.length,
+    return successResponse(
+      res,
+      {
+        summary: {
+          total_requested: medication_ids.length,
+          successful: results.length,
+          failed: errors.length,
+        },
+        results,
+        errors: errors.length ? errors : undefined,
       },
-      results,
-      errors: errors.length ? errors : undefined,
-    }, `${results.length} of ${medication_ids.length} medications processed successfully`);
-
+      `${results.length} of ${medication_ids.length} medications processed successfully`,
+    );
   } catch (error) {
     console.error("Bulk refill error:", error);
     return errorResponse(res, error.message, 500, "BULK_REFILL_ERROR");
@@ -793,6 +865,9 @@ const submitRefill = async (req, res) => {
     const {
       selectedPrescriptions,
       pharmacyId,
+      patient_lat,
+      patient_lng,
+      patient_address,
       fulfillmentType,
       paymentMethod,
     } = req.body;
@@ -828,6 +903,9 @@ const submitRefill = async (req, res) => {
           pharmacy_id: pharmacyId,
           patient_id: req.user.id,
           patient_name: req.user.full_name,
+          patient_lat: patient_lat || req.user.gps_lat,
+          patient_lng: patient_lng || req.user.gps_lng,
+          patient_address: patient_address || req.user.address,
           patient_phone: req.user.phone_number,
           delivery_type: fulfillmentType || "home_delivery",
           payment_method: paymentMethod || "mpesa",
@@ -968,7 +1046,7 @@ const getMyPrescriptions = async (req, res) => {
       if (pharmacy_id) {
         total_amount = itemsWithPrices.reduce(
           (sum, item) => sum + (item.total_price || 0),
-          0
+          0,
         );
       }
 
@@ -983,8 +1061,9 @@ const getMyPrescriptions = async (req, res) => {
         status: p.status,
         items: itemsWithPrices,
         total_amount: total_amount,
-        is_refillable: ["dispensed", "delivered"].includes(p.status) && 
-                       (p.items || []).some(item => (item.quantity || 0) > 0),
+        is_refillable:
+          ["dispensed", "delivered"].includes(p.status) &&
+          (p.items || []).some((item) => (item.quantity || 0) > 0),
         is_expired: p.expiry_date && p.expiry_date < todayStr,
       };
     });
@@ -992,19 +1071,22 @@ const getMyPrescriptions = async (req, res) => {
     // Summary statistics
     const summary = {
       total: formattedPrescriptions.length,
-      pending: formattedPrescriptions.filter(p => p.status === 'pending').length,
-      dispensed: formattedPrescriptions.filter(p => p.status === 'dispensed').length,
-      delivered: formattedPrescriptions.filter(p => p.status === 'delivered').length,
-      expired: formattedPrescriptions.filter(p => p.is_expired).length,
-      refillable: formattedPrescriptions.filter(p => p.is_refillable).length,
+      pending: formattedPrescriptions.filter((p) => p.status === "pending")
+        .length,
+      dispensed: formattedPrescriptions.filter((p) => p.status === "dispensed")
+        .length,
+      delivered: formattedPrescriptions.filter((p) => p.status === "delivered")
+        .length,
+      expired: formattedPrescriptions.filter((p) => p.is_expired).length,
+      refillable: formattedPrescriptions.filter((p) => p.is_refillable).length,
     };
 
     return successResponse(res, {
       prescriptions: formattedPrescriptions,
       summary,
       pharmacy_id_used: pharmacy_id || null,
-      message: pharmacy_id 
-        ? "Prices shown for selected pharmacy" 
+      message: pharmacy_id
+        ? "Prices shown for selected pharmacy"
         : "Select a pharmacy to see current drug prices",
     });
   } catch (error) {
@@ -1100,7 +1182,7 @@ const getRefillablePrescriptions = async (req, res) => {
       if (pharmacy_id) {
         total_amount = itemsWithPrices.reduce(
           (sum, item) => sum + (item.total_price || 0),
-          0
+          0,
         );
       }
 
@@ -1125,7 +1207,7 @@ const getRefillablePrescriptions = async (req, res) => {
         total: formattedPrescriptions.length,
         total_amount: formattedPrescriptions.reduce(
           (sum, p) => sum + p.total_amount,
-          0
+          0,
         ),
       },
       pharmacy_id_used: pharmacy_id || null,
@@ -1139,7 +1221,7 @@ const getRefillablePrescriptions = async (req, res) => {
       res,
       error.message,
       500,
-      "GET_REFILLABLE_PRESCRIPTIONS_ERROR"
+      "GET_REFILLABLE_PRESCRIPTIONS_ERROR",
     );
   }
 };
@@ -1148,11 +1230,24 @@ const getRefillablePrescriptions = async (req, res) => {
 const createOrderFromPrescription = async (req, res) => {
   const t = await sequelize.transaction();
   try {
-    const { prescription_id, pharmacy_id, delivery_type, payment_method, patient_address } = req.body;
+    const {
+      prescription_id,
+      pharmacy_id,
+      patient_lat,
+      patient_lng,
+      delivery_type,
+      payment_method,
+      patient_address,
+    } = req.body;
 
     if (!prescription_id) {
       await t.rollback();
-      return errorResponse(res, 'prescription_id is required', 400, 'MISSING_FIELD');
+      return errorResponse(
+        res,
+        "prescription_id is required",
+        400,
+        "MISSING_FIELD",
+      );
     }
 
     const prescription = await Prescription.findOne({
@@ -1165,72 +1260,100 @@ const createOrderFromPrescription = async (req, res) => {
 
     if (!prescription) {
       await t.rollback();
-      return errorResponse(res, 'Prescription not found', 404, 'NOT_FOUND');
+      return errorResponse(res, "Prescription not found", 404, "NOT_FOUND");
     }
 
     const todayStr = getTodayLocal();
     if (prescription.expiry_date && prescription.expiry_date < todayStr) {
       await t.rollback();
-      return errorResponse(res, 'Prescription has expired', 400, 'PRESCRIPTION_EXPIRED');
+      return errorResponse(
+        res,
+        "Prescription has expired",
+        400,
+        "PRESCRIPTION_EXPIRED",
+      );
     }
 
     if (!["dispensed", "delivered"].includes(prescription.status)) {
       await t.rollback();
-      return errorResponse(res, 'Prescription is not available for refill', 400, 'INVALID_STATUS');
+      return errorResponse(
+        res,
+        "Prescription is not available for refill",
+        400,
+        "INVALID_STATUS",
+      );
     }
 
     const items = prescription.items || [];
-    const validItems = items.filter(item => (item.quantity || 0) > 0);
-    
+    const validItems = items.filter((item) => (item.quantity || 0) > 0);
+
     if (validItems.length === 0) {
       await t.rollback();
-      return errorResponse(res, 'No remaining medications in this prescription', 400, 'NO_REMAINING_ITEMS');
+      return errorResponse(
+        res,
+        "No remaining medications in this prescription",
+        400,
+        "NO_REMAINING_ITEMS",
+      );
     }
 
-    const total_amount = validItems.reduce((sum, item) => 
-      sum + ((item.quantity || 0) * (item.unit_price || 0)), 0
+    const total_amount = validItems.reduce(
+      (sum, item) => sum + (item.quantity || 0) * (item.unit_price || 0),
+      0,
     );
 
-    const order = await Order.create({
-      order_number: `ORD-${Date.now()}-${prescription_id.slice(0, 4)}`,
-      prescription_id: prescription.id,
-      pharmacy_id: pharmacy_id || prescription.pharmacy_id,
-      patient_id: req.user.id,
-      patient_name: req.user.full_name,
-      patient_phone: req.user.phone_number,
-      patient_address: patient_address || req.user.address,
-      delivery_type: delivery_type || 'home_delivery',
-      payment_method: payment_method || 'mpesa',
-      total_amount: total_amount,
-      status: 'pending',
-      payment_status: 'unpaid',
-    }, { transaction: t });
+    const order = await Order.create(
+      {
+        order_number: `ORD-${Date.now()}-${prescription_id.slice(0, 4)}`,
+        prescription_id: prescription.id,
+        pharmacy_id: pharmacy_id || prescription.pharmacy_id,
+        patient_id: req.user.id,
+        patient_name: req.user.full_name,
+        patient_lat: patient_lat || req.user.gps_lat,
+        patient_lng: patient_lng || req.user.gps_lng,
+        patient_phone: req.user.phone_number,
+        patient_address: patient_address || req.user.address,
+        delivery_type: delivery_type || "home_delivery",
+        payment_method: payment_method || "mpesa",
+        total_amount: total_amount,
+        status: "pending",
+        payment_status: "unpaid",
+      },
+      { transaction: t },
+    );
 
-    const updatedItems = items.map(item => ({
+    const updatedItems = items.map((item) => ({
       ...item,
-      quantity: 0
+      quantity: 0,
     }));
-    
-    await prescription.update({ 
-      items: updatedItems
-    }, { transaction: t });
+
+    await prescription.update(
+      {
+        items: updatedItems,
+      },
+      { transaction: t },
+    );
 
     await t.commit();
 
-    return successResponse(res, {
-      order_id: order.id,
-      order_number: order.order_number,
-      prescription_number: prescription.prescription_number,
-      total_amount: total_amount,
-      status: order.status,
-      payment_status: order.payment_status,
-      message: 'Order created successfully. Proceed to payment.',
-    }, 'Order created successfully', 201);
-
+    return successResponse(
+      res,
+      {
+        order_id: order.id,
+        order_number: order.order_number,
+        prescription_number: prescription.prescription_number,
+        total_amount: total_amount,
+        status: order.status,
+        payment_status: order.payment_status,
+        message: "Order created successfully. Proceed to payment.",
+      },
+      "Order created successfully",
+      201,
+    );
   } catch (error) {
     await t.rollback();
-    console.error('Create order error:', error);
-    return errorResponse(res, error.message, 500, 'CREATE_ORDER_ERROR');
+    console.error("Create order error:", error);
+    return errorResponse(res, error.message, 500, "CREATE_ORDER_ERROR");
   }
 };
 
@@ -1238,11 +1361,24 @@ const createOrderFromPrescription = async (req, res) => {
 const createOrdersFromPrescriptions = async (req, res) => {
   const t = await sequelize.transaction();
   try {
-    const { prescription_ids, pharmacy_id, delivery_type, payment_method, patient_address } = req.body;
+    const {
+      prescription_ids,
+      pharmacy_id,
+      patient_lat,
+      patient_lng,
+      delivery_type,
+      payment_method,
+      patient_address,
+    } = req.body;
 
     if (!prescription_ids || !prescription_ids.length) {
       await t.rollback();
-      return errorResponse(res, 'prescription_ids array is required', 400, 'MISSING_FIELD');
+      return errorResponse(
+        res,
+        "prescription_ids array is required",
+        400,
+        "MISSING_FIELD",
+      );
     }
 
     const orders = [];
@@ -1259,68 +1395,77 @@ const createOrdersFromPrescriptions = async (req, res) => {
         });
 
         if (!prescription) {
-          errors.push({ prescription_id, error: 'Prescription not found' });
+          errors.push({ prescription_id, error: "Prescription not found" });
           continue;
         }
 
         const todayStr = getTodayLocal();
         if (prescription.expiry_date && prescription.expiry_date < todayStr) {
-          errors.push({ 
-            prescription_id, 
+          errors.push({
+            prescription_id,
             prescription_number: prescription.prescription_number,
-            error: 'Prescription has expired' 
+            error: "Prescription has expired",
           });
           continue;
         }
 
         if (!["dispensed", "delivered"].includes(prescription.status)) {
-          errors.push({ 
-            prescription_id, 
+          errors.push({
+            prescription_id,
             prescription_number: prescription.prescription_number,
-            error: 'Prescription not available for refill' 
+            error: "Prescription not available for refill",
           });
           continue;
         }
 
         const items = prescription.items || [];
-        const validItems = items.filter(item => (item.quantity || 0) > 0);
-        
+        const validItems = items.filter((item) => (item.quantity || 0) > 0);
+
         if (validItems.length === 0) {
-          errors.push({ 
-            prescription_id, 
+          errors.push({
+            prescription_id,
             prescription_number: prescription.prescription_number,
-            error: 'No remaining medications' 
+            error: "No remaining medications",
           });
           continue;
         }
 
-        const total_amount = validItems.reduce((sum, item) => 
-          sum + ((item.quantity || 0) * (item.unit_price || 0)), 0
+        const total_amount = validItems.reduce(
+          (sum, item) => sum + (item.quantity || 0) * (item.unit_price || 0),
+          0,
         );
 
-        const order = await Order.create({
-          order_number: `ORD-${Date.now()}-${prescription_id.slice(0, 4)}`,
-          prescription_id: prescription.id,
-          pharmacy_id: pharmacy_id || prescription.pharmacy_id,
-          patient_id: req.user.id,
-          patient_name: req.user.full_name,
-          patient_phone: req.user.phone_number,
-          patient_address: patient_address || req.user.address,
-          delivery_type: delivery_type || 'home_delivery',
-          payment_method: payment_method || 'mpesa',
-          total_amount: total_amount,
-          status: 'pending',
-          payment_status: 'unpaid',
-        }, { transaction: t });
+        const order = await Order.create(
+          {
+            order_number: `ORD-${Date.now()}-${prescription_id.slice(0, 4)}`,
+            prescription_id: prescription.id,
+            pharmacy_id: pharmacy_id || prescription.pharmacy_id,
+            patient_id: req.user.id,
+            patient_name: req.user.full_name,
+            patient_lat: patient_lat || req.user.gps_lat,
+            patient_lng: patient_lng || req.user.gps_lng,
+            patient_phone: req.user.phone_number,
+            patient_address: patient_address || req.user.address,
+            delivery_type: delivery_type || "home_delivery",
+            payment_method: payment_method || "mpesa",
+            total_amount: total_amount,
+            status: "pending",
+            payment_status: "unpaid",
+          },
+          { transaction: t },
+        );
 
-        const updatedItems = items.map(item => ({
+        const updatedItems = items.map((item) => ({
           ...item,
-          quantity: 0
+          quantity: 0,
         }));
-        
-        await prescription.update({ 
-          items: updatedItems
-        }, { transaction: t });
+
+        await prescription.update(
+          {
+            items: updatedItems,
+          },
+          { transaction: t },
+        );
 
         orders.push({
           order_id: order.id,
@@ -1328,7 +1473,6 @@ const createOrdersFromPrescriptions = async (req, res) => {
           prescription_number: prescription.prescription_number,
           total_amount: total_amount,
         });
-
       } catch (err) {
         errors.push({ prescription_id, error: err.message });
       }
@@ -1336,22 +1480,26 @@ const createOrdersFromPrescriptions = async (req, res) => {
 
     await t.commit();
 
-    return successResponse(res, {
-      summary: {
-        total_requested: prescription_ids.length,
-        successful: orders.length,
-        failed: errors.length,
+    return successResponse(
+      res,
+      {
+        summary: {
+          total_requested: prescription_ids.length,
+          successful: orders.length,
+          failed: errors.length,
+        },
+        orders: orders,
+        total_amount: orders.reduce((sum, o) => sum + o.total_amount, 0),
+        errors: errors.length ? errors : undefined,
+        message: `${orders.length} of ${prescription_ids.length} order(s) created successfully. Proceed to payment.`,
       },
-      orders: orders,
-      total_amount: orders.reduce((sum, o) => sum + o.total_amount, 0),
-      errors: errors.length ? errors : undefined,
-      message: `${orders.length} of ${prescription_ids.length} order(s) created successfully. Proceed to payment.`,
-    }, 'Orders processed successfully', 201);
-
+      "Orders processed successfully",
+      201,
+    );
   } catch (error) {
     await t.rollback();
-    console.error('Create multiple orders error:', error);
-    return errorResponse(res, error.message, 500, 'CREATE_ORDERS_ERROR');
+    console.error("Create multiple orders error:", error);
+    return errorResponse(res, error.message, 500, "CREATE_ORDERS_ERROR");
   }
 };
 

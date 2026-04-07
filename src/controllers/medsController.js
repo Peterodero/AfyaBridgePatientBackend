@@ -895,7 +895,6 @@ const searchMedicines = async (req, res) => {
 };
 
 // ─── GET /meds/prescriptions ──────────────────────────────────────────────
-// Returns ALL prescriptions for the patient (new + old + refillable)
 const getMyPrescriptions = async (req, res) => {
   try {
     const prescriptions = await Prescription.findAll({
@@ -920,13 +919,15 @@ const getMyPrescriptions = async (req, res) => {
       diagnosis: p.diagnosis,
       doctor_name: p.doctor?.full_name,
       doctor_specialization: p.doctor?.specialty,
-      status: p.status,  // draft, pending, validated, rejected, dispensed, delivered
+      status: p.status,
       items: (p.items || []).map((item) => ({
-        drug_name: item.drug_name,
+        drug_name: item.name,        // ← FIXED: Use 'name' from database
         dosage: item.dosage,
         dosage_form: item.dosage_form,
         quantity: item.quantity,
         instructions: item.instructions,
+        frequency: item.frequency,
+        duration: item.duration,
       })),
       is_refillable: ["dispensed", "delivered"].includes(p.status) && 
                      (p.items || []).some(item => (item.quantity || 0) > 0),
@@ -938,7 +939,7 @@ const getMyPrescriptions = async (req, res) => {
         total: formattedPrescriptions.length,
         new: formattedPrescriptions.filter(p => p.status === 'pending').length,
         dispensed: formattedPrescriptions.filter(p => p.status === 'dispensed').length,
-        expired: formattedPrescriptions.filter(p => p.expiry_date < getTodayLocal()).length,
+        expired: formattedPrescriptions.filter(p => p.expiry_date && p.expiry_date < getTodayLocal()).length,
       },
     });
   } catch (error) {

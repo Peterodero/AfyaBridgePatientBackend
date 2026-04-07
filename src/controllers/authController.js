@@ -72,7 +72,15 @@ const findValidRefreshToken = async (token) => {
 // POST /auth/register
 const register = async (req, res) => {
   try {
-    const { fullName, phoneNumber, email, password, termsAccepted } = req.body;
+    const { 
+      fullName, 
+      phoneNumber, 
+      email, 
+      password, 
+      termsAccepted,
+      latitude,      // NEW - from frontend
+      longitude      // NEW - from frontend
+    } = req.body;
 
     if (!termsAccepted)
       return errorResponse(res, 'You must accept terms and conditions', 400, 'TERMS_NOT_ACCEPTED');
@@ -97,34 +105,42 @@ const register = async (req, res) => {
     if (existingEmail)
       return errorResponse(res, 'Email already registered', 409, 'EMAIL_EXISTS');
 
-    const user = await User.create({
+    // Prepare user data
+    const userData = {
       role: 'patient',
       full_name: fullName,
       phone_number: phoneNumber,
       email,
       password_hash: password,
-    });
+    };
 
-    // Auto-create wallet so patient can pay immediately after registration
-    await Wallet.create({
-      user_id: user.id,
-      balance: 5000,
-      currency: 'KES',
-      is_active: true,
-    });
+    // Add latitude and longitude if provided
+    if (latitude && longitude) {
+      userData.gps_lat = latitude;
+      userData.gps_lng = longitude;
+    }
 
-    const otpCode = await saveOTP(phoneNumber, 'registration');
-    console.log(`Generated OTP for ${phoneNumber}: ${otpCode}`); // For testing purposes
-    // TODO: await sendSMS(phoneNumber, `Your AfyaBridge verification code is ${otpCode}`);
+    const user = await User.create(userData);
+
+    // Remove password from response
+    const userResponse = {
+      id: user.id,
+      full_name: user.full_name,
+      email: user.email,
+      phone_number: user.phone_number,
+      role: user.role,
+      gps_lat: user.gps_lat,
+      gps_lng: user.gps_lng,
+    };
 
     return successResponse(res, {
-      patientId: user.id,
-      phoneNumber: user.phone_number,
-      verificationRequired: true,
-      verificationMethod: 'sms',
-    }, 'Registration successful', 201);
+      user: userResponse,
+      message: 'Registration successful. Please verify your account.',
+    }, 'User registered successfully', 201);
+
   } catch (error) {
-    return errorResponse(res, error.message, 500, 'REGISTER_ERROR');
+    console.error('Registration error:', error);
+    return errorResponse(res, error.message, 500, 'REGISTRATION_ERROR');
   }
 };
 
@@ -189,7 +205,13 @@ const login = async (req, res) => {
       // Always send OTP to phone, regardless of login method
       const otpCode = await saveOTP(user.phone_number, 'registration');
       console.log(`Generated OTP for ${user.phone_number}: ${otpCode}`);
-      return errorResponse(res, 'Phone not verified. A new code has been sent.', 403, 'NOT_VERIFIED');
+      
+      // Return email, phone, and userId in the details field
+      return errorResponse(res, 'Phone not verified.', 403, 'NOT_VERIFIED', {
+        email: user.email,
+        phone: user.phone_number,
+        userId: user.id
+      });
     }
 
     if (!user.is_active || user.account_status !== 'active')

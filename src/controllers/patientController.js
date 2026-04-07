@@ -181,7 +181,7 @@ const getClinicalProfile = async (req, res) => {
       : null;
 
     return successResponse(res, {
-      patient: { name: user.full_name, age, patientId: user.id },
+      patient: { name: user.full_name, age, patientId: user.id, profileImage: user.profile_image },
       vitals: latestVital ? {
         heartRate:     { value: latestVital.heart_rate, unit: 'bpm', status: 'normal', icon: '' },
         bloodPressure: { value: `${latestVital.blood_pressure_systolic}/${latestVital.blood_pressure_diastolic}`, unit: 'mmHg', status: 'normal', icon: '' },

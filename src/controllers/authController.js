@@ -78,8 +78,9 @@ const register = async (req, res) => {
       email, 
       password, 
       termsAccepted,
-      latitude,      // NEW - from frontend
-      longitude      // NEW - from frontend
+      latitude,
+      longitude,
+      dateOfBirth      // Format: YYYY-MM-DD
     } = req.body;
 
     if (!termsAccepted)
@@ -112,6 +113,7 @@ const register = async (req, res) => {
       phone_number: phoneNumber,
       email,
       password_hash: password,
+      date_of_birth: dateOfBirth || null,   // Just store as is, no age calculation
     };
 
     // Add latitude and longitude if provided
@@ -129,6 +131,7 @@ const register = async (req, res) => {
       email: user.email,
       phone_number: user.phone_number,
       role: user.role,
+      date_of_birth: user.date_of_birth,
       gps_lat: user.gps_lat,
       gps_lng: user.gps_lng,
     };

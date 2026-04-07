@@ -1,5 +1,6 @@
 const { DataTypes, UUIDV4 } = require("sequelize");
 const bycrypt = require("bcryptjs");
+const { calculateAge } = require("../utils/ageCalculator");
 
 module.exports = (sequelize) => {
   const User = sequelize.define(
@@ -202,7 +203,7 @@ module.exports = (sequelize) => {
         defaultValue: false, // nullable — rider only
       },
       approved_status: {
-        type: DataTypes.ENUM("pending", "approved", "rejected"),// nullable — rider only
+        type: DataTypes.ENUM("pending", "approved", "rejected"), // nullable — rider only
         // nullable — rider only
       },
       date_approved: {
@@ -229,11 +230,11 @@ module.exports = (sequelize) => {
         type: DataTypes.UUID, // nullable — pharmacist / pharmacy_manager / delivery_partner only
       },
       gps_lat: {
-        type: DataTypes.STRING(255), // nullable 
+        type: DataTypes.STRING(255), // nullable
       },
       gps_lng: {
-        type: DataTypes.STRING(255), // nullable 
-      }
+        type: DataTypes.STRING(255), // nullable
+      },
 
       // NOTE: Notification preferences are stored in the
       // notification_preferences table, not here.
@@ -277,8 +278,13 @@ module.exports = (sequelize) => {
   );
 
   User.prototype.comparePassword = async function (password) {
-  return bycrypt.compare(password, this.password_hash);
-};
+    return bycrypt.compare(password, this.password_hash);
+  };
+
+  // Add this inside your User model definition
+  User.prototype.getAge = function () {
+    return calculateAge(this.date_of_birth);
+  };
 
   return User;
 };

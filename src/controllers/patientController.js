@@ -48,6 +48,7 @@ const getDashboard = async (req, res) => {
     return successResponse(res, {
       patient: {
         firstName: user.full_name.split(' ')[0],
+        age: user.getAge(),
         greeting,
         profileImage: user.profile_image,
         unreadNotifications: unreadCount,
@@ -176,12 +177,12 @@ const getClinicalProfile = async (req, res) => {
       order: [['recorded_at', 'DESC']],
     });
 
-    const age = user.date_of_birth
-      ? Math.floor((new Date() - new Date(user.date_of_birth)) / (1000 * 60 * 60 * 24 * 365.25))
-      : null;
+    // const age = user.date_of_birth
+    //   ? Math.floor((new Date() - new Date(user.date_of_birth)) / (1000 * 60 * 60 * 24 * 365.25))
+    //   : null;
 
     return successResponse(res, {
-      patient: { name: user.full_name, age, patientId: user.id, profileImage: user.profile_image },
+      patient: { name: user.full_name, age: user.getAge(), patientId: user.id, profileImage: user.profile_image },
       vitals: latestVital ? {
         heartRate:     { value: latestVital.heart_rate, unit: 'bpm', status: 'normal', icon: '' },
         bloodPressure: { value: `${latestVital.blood_pressure_systolic}/${latestVital.blood_pressure_diastolic}`, unit: 'mmHg', status: 'normal', icon: '' },

@@ -49,7 +49,11 @@ const getNearbyPharmacies = async (req, res) => {
 // GET /pharmacies/search
 const searchPharmacies = async (req, res) => {
   try {
-    const { q, lat, lng } = req.query;
+    const { q, lat, lng, radius = 5 } = req.query;
+
+    if (!q) {
+      return errorResponse(res, 'Search term is required', 400, 'MISSING_SEARCH_TERM');
+    }
 
     const pharmacies = await Pharmacy.findAll({
       where: {
@@ -57,36 +61,47 @@ const searchPharmacies = async (req, res) => {
         [Op.or]: [
           { name: { [Op.like]: `%${q}%` } },
           { address_line1: { [Op.like]: `%${q}%` } },
+          { address_line2: { [Op.like]: `%${q}%` } },
           { county: { [Op.like]: `%${q}%` } },
+          // Removed 'city' - not in your model
         ],
       },
     });
 
-    const withDistance = pharmacies.map((p) => ({
+    // If location provided, calculate distance and filter by radius
+    let nearby = pharmacies.map((p) => ({
       ...p.toJSON(),
-      distance:
-        lat && lng
-          ? `${getDistance(parseFloat(lat), parseFloat(lng), parseFloat(p.gps_lat), parseFloat(p.gps_lng))} km`
-          : null,
+      distance: lat && lng
+        ? parseFloat(getDistance(parseFloat(lat), parseFloat(lng), parseFloat(p.gps_lat), parseFloat(p.gps_lng)))
+        : null,
     }));
 
+    if (lat && lng && radius) {
+      nearby = nearby.filter((p) => p.distance !== null && p.distance <= parseFloat(radius));
+    }
+
+    // Sort by distance if location provided
+    if (lat && lng) {
+      nearby.sort((a, b) => (a.distance || 999) - (b.distance || 999));
+    }
+
     return successResponse(res, {
-      searchTerm: q,
-      pharmacies: withDistance.map((p) => ({
+      pharmacies: nearby.map((p) => ({
         id: p.id,
         name: p.name,
-        address: `${p.address_line1}, ${p.county}`,
+        latitude: p.gps_lat,
+        longitude: p.gps_lng,
+        address: `${p.address_line1 || ''}${p.address_line2 ? ', ' + p.address_line2 : ''}${p.county ? ', ' + p.county : ''}`,
         phone: p.phone,
-        distance: p.distance,
+        distance: p.distance !== null ? `${p.distance} km` : null,
         is24hr: p.is_24hr,
-        location: { lat: p.gps_lat, lng: p.gps_lng },
+        selected: false,
       })),
-      mapData: {
-        center: { lat: parseFloat(lat), lng: parseFloat(lng) },
-        pharmacyPins: withDistance.map((p) => ({ id: p.id, lat: p.gps_lat, lng: p.gps_lng, name: p.name })),
-      },
+      searchTerm: q,
+      total: nearby.length,
     });
   } catch (error) {
+    console.error('Search pharmacies error:', error);
     return errorResponse(res, error.message, 500, 'SEARCH_PHARMACIES_ERROR');
   }
 };

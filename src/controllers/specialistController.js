@@ -156,13 +156,15 @@ const getSpecialistById = async (req, res) => {
 // GET /specialists/:id/slots?date=YYYY-MM-DD
 const getAvailableSlots = async (req, res) => {
   try {
-    const { id } = req.params;   // ← matches route /:id/slots
+    const { doctorId } = req.params;   // ← matches route /:id/slots
     const { date } = req.query;
+    console.log(req.params)
 
     const targetDate = date || new Date().toISOString().split('T')[0];
+    console.log(`Fetching slots for doctor ${doctorId} on date ${targetDate}`);
 
     const slots = await AppointmentSlot.findAll({
-      where: { doctor_id: id, date: targetDate },
+      where: { doctor_id: doctorId },
       order: [['time', 'ASC']],
     });
 
@@ -170,7 +172,7 @@ const getAvailableSlots = async (req, res) => {
     const dateLabel = dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
 
     return successResponse(res, {
-      doctorId: id,
+      doctorId: doctorId,
       date: dateLabel,
       slots: slots.map((s) => ({
         id: s.id,

@@ -158,7 +158,7 @@ const getAvailableSlots = async (req, res) => {
   try {
     const { doctorId } = req.params;   // ← matches route /:id/slots
     const { date } = req.query;
-    console.log(req.params)
+    console.log(req.query)
 
     const targetDate = date || new Date().toISOString().split('T')[0];
     console.log(`Fetching slots for doctor ${doctorId} on date ${targetDate}`);

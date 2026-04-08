@@ -48,6 +48,8 @@ const getDashboard = async (req, res) => {
     return successResponse(res, {
       patient: {
         firstName: user.full_name.split(' ')[0],
+        email: user.email,
+        id: user.id,
         age: user.getAge(),
         greeting,
         profileImage: user.profile_image,
@@ -120,6 +122,7 @@ const getPersonalInfo = async (req, res) => {
       dateOfBirth: user.date_of_birth,
       gender: user.gender,
       email: user.email,
+      id: user.id,
       phoneNumber: user.phone_number,
       bio: user.bio,
     });

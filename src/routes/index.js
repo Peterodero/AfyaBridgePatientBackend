@@ -290,6 +290,8 @@ medsRouter.post(
 // In patientRoutes.js or medsRouter
 medsRouter.get("/prescriptions", authenticate, medsController.getMyPrescriptions);
 
+medsRouter.get("/prescriptions/latest", authenticate, medsController.getLatestPrescription);
+
 // Get refillable prescriptions (active, not expired, with remaining quantity)
 medsRouter.get(
   "/prescriptions/refillable",

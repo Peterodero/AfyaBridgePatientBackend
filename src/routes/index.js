@@ -303,14 +303,6 @@ medsRouter.get(
 medsRouter.post(
   "/order/create",
   authenticate,
-  [
-    body("prescription_id").notEmpty().withMessage("prescription_id is required"),
-    body("pharmacy_id").optional().isUUID().withMessage("Invalid pharmacy_id"),
-    body("delivery_type").optional().isIn(["pickup", "home_delivery"]).withMessage("delivery_type must be pickup or home_delivery"),
-    body("payment_method").optional().isIn(["mpesa", "cash", "insurance", "nhif"]).withMessage("Invalid payment method"),
-    body("patient_address").optional().isString().withMessage("patient_address must be a string"),
-    validate,
-  ],
   medsController.createOrderFromPrescription,
 );
 
@@ -318,15 +310,6 @@ medsRouter.post(
 medsRouter.post(
   "/orders/create-bulk",
   authenticate,
-  [
-    body("prescription_ids").isArray().withMessage("prescription_ids must be an array"),
-    body("prescription_ids.*").isUUID().withMessage("Each prescription_id must be a valid UUID"),
-    body("pharmacy_id").optional().isUUID().withMessage("Invalid pharmacy_id"),
-    body("delivery_type").optional().isIn(["pickup", "home_delivery"]).withMessage("delivery_type must be pickup or home_delivery"),
-    body("payment_method").optional().isIn(["mpesa", "cash", "insurance", "nhif"]).withMessage("Invalid payment method"),
-    body("patient_address").optional().isString().withMessage("patient_address must be a string"),
-    validate,
-  ],
   medsController.createOrdersFromPrescriptions,
 );
 

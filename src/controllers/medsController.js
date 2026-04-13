@@ -1435,6 +1435,16 @@ const createOrderFromPrescription = async (req, res) => {
       { transaction: t },
     );
 
+    // Update prescription status to pending after order is created
+    const prep = await prescription.update(
+      {
+        status: "pending",
+      },
+      { transaction: t },
+    );
+
+    console.log(prep)
+
     // TODO: Uncomment after frontend adds quantity field
     // const updatedItems = items.map(item => ({
     //   ...item,

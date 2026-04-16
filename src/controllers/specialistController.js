@@ -371,6 +371,7 @@ const getMyAppointments = async (req, res) => {
           reason: a.reason,
           priority: a.priority,
           charges: a.charges,
+          meeting_url: a.meeting_url,
           doctor: doc ? {
             id: doc.id,
             name: doc.full_name,

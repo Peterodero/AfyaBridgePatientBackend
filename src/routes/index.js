@@ -467,6 +467,30 @@ consultationRouter.post(
   consultationController.endConsultation,
 );
 
+consultationRouter.get(
+  "/",
+  authenticate,
+  consultationController.getConsultations,
+);
+
+consultationRouter.get(
+  "/history",
+  authenticate,
+  consultationController.getConsultationHistory,
+);
+
+consultationRouter.get(
+  "/upcoming",
+  authenticate,
+  consultationController.getUpcomingConsultations,
+);
+
+consultationRouter.get(
+  "/:consultationId",
+  authenticate,
+  consultationController.getConsultationById,
+);
+
 module.exports.consultationRouter = consultationRouter;
 
 //  LOCATION ROUTES
